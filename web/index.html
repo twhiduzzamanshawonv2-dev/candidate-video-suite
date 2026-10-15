@@ -252,6 +252,7 @@ function updateStatus(info) {
   const ph = connected ? 'Type or paste a folder path, or click Browse' : 'Click Browse to choose a folder (typing needs the local helper)';
   $('folderDl').placeholder = $('folderRv').placeholder = ph;
 }
+const MIN_HELPER = 1.4;   // oldest helper version this page works well with
 let folder = '', helperInfo = null, wasmOk = null;
 function renderChecks() {
   const ua = navigator.userAgent;
@@ -261,8 +262,10 @@ function renderChecks() {
       d: hasFS && chromium ? 'Chrome/Edge on desktop – folder access supported' : 'Open this page in desktop Chrome or Edge' },
     { s: wasmOk === null ? 'wait' : wasmOk ? 'ok' : 'warn', t: 'In-browser converter',
       d: wasmOk === null ? 'Checking…' : wasmOk ? 'FFmpeg.wasm bundle available (slow fallback)' : 'FFmpeg.wasm files could not be loaded' },
-    { s: connected ? 'ok' : 'warn', t: 'Local helper',
-      d: connected ? `Running (v${helperInfo?.version || '?'}) – downloads go straight to this PC`
+    { s: connected ? (parseFloat(helperInfo?.version) >= MIN_HELPER ? 'ok' : 'warn') : 'warn', t: 'Local helper',
+      d: connected ? (parseFloat(helperInfo?.version) >= MIN_HELPER
+                      ? `Running (v${helperInfo?.version}) – downloads go straight to this PC`
+                      : `Running v${helperInfo?.version || '?'} but OUTDATED (need v${MIN_HELPER}) – run Setup again to update (fixes duplicate folder windows)`)
                    : 'Not detected – required for links that block browsers (CORS). Download the setup below, or click Re-check if it is already installed' },
     { s: !connected ? 'wait' : helperInfo?.python ? 'ok' : 'warn', t: 'Python',
       d: !connected ? 'Checked once the helper is running' : helperInfo?.python ? 'Python ' + helperInfo.python : 'Unknown' },
@@ -276,7 +279,7 @@ function renderChecks() {
   const icon = { ok: '✅', bad: '❌', warn: '⚠️', wait: '⚪' };
   $('checkList').innerHTML = items.map((i) => `<div class="chk"><span class="ic">${icon[i.s]}</span><div><div class="tt">${i.t}</div><div class="dd">${esc(i.d)}</div></div></div>`).join('');
   const bad = items.some((i) => i.s === 'bad'), warn = items.some((i) => i.s === 'warn');
-  $('checkSetup').classList.toggle('hidden', connected);
+  $('checkSetup').classList.toggle('hidden', connected && parseFloat(helperInfo?.version) >= MIN_HELPER);
   const sum = $('checkSummary');
   sum.className = 'badge ' + (bad ? 'bad' : warn ? 'warn' : 'ok');
   sum.textContent = bad ? 'Action needed' : warn ? 'Helper recommended' : 'All good';

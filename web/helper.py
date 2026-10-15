@@ -212,7 +212,7 @@ def ffmpeg_version():
 def ping():
     return {
         "ok": True,
-        "version": "1.3",
+        "version": "1.4",
         "python": sys.version.split()[0],
         "ffmpeg": FFMPEG is not None,
         "ffmpeg_version": ffmpeg_version() or "",
