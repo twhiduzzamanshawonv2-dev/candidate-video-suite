@@ -50,6 +50,14 @@
   .pill { display:flex; align-items:center; gap:7px; font-size:12px; color:var(--muted); }
   .dot { width:8px; height:8px; border-radius:50%; background:var(--err); }
   .dot.on { background:var(--ok); }
+  .dot.warn { background:var(--warn); }
+  .toast { position:fixed; left:50%; bottom:28px; transform:translateX(-50%) translateY(18px); background:var(--text); color:var(--bg);
+           padding:12px 18px; border-radius:12px; font-size:13.5px; line-height:1.4; max-width:min(560px, calc(100vw - 32px));
+           box-shadow:0 10px 30px rgba(0,0,0,.28); opacity:0; pointer-events:none; transition:opacity .25s, transform .25s; z-index:50; }
+  .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+  .nudge { animation:cv-nudge 1.5s ease-out 1; }
+  @keyframes cv-nudge { 0% { box-shadow:0 0 0 0 color-mix(in srgb, var(--accent) 65%, transparent); } 70% { box-shadow:0 0 0 16px transparent; } 100% { box-shadow:0 0 0 0 transparent; } }
+  @media (prefers-reduced-motion: reduce) { .nudge { animation:none; } .toast { transition:none; } }
   main { padding:20px; max-width:1500px; margin:0 auto; }
   .narrow { max-width:820px; margin:0 auto; }
   .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; }
@@ -374,14 +382,17 @@ const hasFS = 'showDirectoryPicker' in window;
 let connected = false;           // optional local helper detected
 let dirHandle = null;            // folder picked in browser mode
 const useHelper = () => connected;
+const helperSeen = () => store.get('helperSeen', '') === '1';   // has this browser ever talked to the helper?
 let firstCheckDone = false;      // false until the first helper check has answered
 function updateStatus(info) {
   const ok = connected || hasFS;
-  $('dot').classList.toggle('on', ok);
+  $('dot').classList.toggle('on', connected);
+  $('dot').classList.toggle('warn', !connected && hasFS);
   $('status').textContent = connected
     ? 'Local helper connected' + (info && !info.ffmpeg ? ' · FFmpeg missing' : '')
     : !firstCheckDone ? 'Checking helper…'
-    : hasFS ? 'Browser mode' : 'Unsupported browser';
+    : !hasFS ? 'Unsupported browser'
+    : helperSeen() ? 'Helper not running' : 'Helper not installed';
   $('setup').classList.toggle('hidden', ok);
   $('folderDl').readOnly = $('folderRv').readOnly = !connected;
   const ph = connected ? 'Type or paste a folder path, or click Browse' : 'Click Browse to choose a folder (typing needs the local helper)';
@@ -463,6 +474,7 @@ function runWasmCheck() {
 }
 function setConnected(ok, info) {
   const was = connected; connected = ok; helperInfo = ok ? info : null;
+  if (ok) store.set('helperSeen', '1');
   renderChecks();
   updateStatus(info);
   if (ok) $('helperBanner').classList.add('hidden');
@@ -572,6 +584,22 @@ function paintBrowse() {
     $(id).textContent = browsePending ? '⏳ Folder window open…' : browseStarting ? '⏳ Connecting to helper…' : BROWSE_LABELS[id];
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let toastTimer = null;
+function toast(msg) {
+  let t = $('toast');
+  if (!t) { t = document.createElement('div'); t.id = 'toast'; t.className = 'toast'; t.setAttribute('role', 'status'); document.body.appendChild(t); }
+  t.textContent = msg;
+  requestAnimationFrame(() => t.classList.add('show'));
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 8000);
+}
+function guideToInstall(msg) {
+  // For a brand-new person: no waiting and no confusing questions, just show the first step.
+  const card = $('checks');
+  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  card.classList.remove('nudge'); void card.offsetWidth; card.classList.add('nudge');
+  toast(msg);
+}
+const INSTALL_FIRST = 'First step: install the helper (one time, about 2 minutes). Click “Download Setup.bat” above and open it, then press Re-check. Already installed? Just press Re-check.';
 let raising = false;
 function raiseFolderWindow() {
   // One quick request at a time: piling up long-waiting requests fills Chrome's 6-connection limit,
@@ -583,6 +611,10 @@ function raiseFolderWindow() {
 async function browse(after, title) {
   if (browseStarting) return;
   if (browsePending) { raiseFolderWindow(); return; }
+  if (!useHelper() && !helperSeen()) {
+    await checkHelper(true, 4000);                  // quick look in case it is already running
+    if (!connected) { guideToInstall(INSTALL_FIRST); return; }
+  }
   try {
     if (!browsePending && !useHelper()) {
       // Don't trust a stale "not connected": re-check now and try to start the helper first
@@ -629,6 +661,7 @@ $('mode').onchange = () => $('presetBox').classList.toggle('hidden', $('mode').v
 /* ── Jobs ── */
 const history = [];
 async function runJob(items) {
+  if (!useHelper() && !helperSeen() && !dirHandle) return guideToInstall(INSTALL_FIRST);
   if (!folder) return alert('Please select a download destination folder first!');
   if (!useHelper()) return runBrowserJob(items);
   $('jobCard').classList.remove('hidden'); $('summary').classList.add('hidden');
