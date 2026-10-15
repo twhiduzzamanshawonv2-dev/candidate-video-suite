@@ -97,6 +97,32 @@
   .mono { font-family:ui-monospace,Consolas,monospace; color:var(--dim); font-size:11px; }
   input[type=range] { flex:1; accent-color:var(--text); }
   .syncdot { width:6px; height:6px; border-radius:50%; background:var(--ok); } .syncdot.warn { background:var(--warn); }
+  /* Bulk upload */
+  .bulk-head { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+  .bulk-title { font-size:16px; font-weight:650; letter-spacing:-.01em; }
+  .bulk-sub { font-size:12.5px; color:var(--muted); margin-top:2px; }
+  .dz { border:2px dashed var(--line2); border-radius:16px; padding:38px 20px 30px; text-align:center; cursor:pointer; background:var(--bg); transition:border-color .15s, background .15s, transform .15s; outline:none; }
+  .dz:hover, .dz:focus-visible { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 6%, var(--bg)); }
+  .dz.drag { border-color:var(--accent); border-style:solid; background:color-mix(in srgb, var(--accent) 13%, var(--bg)); transform:scale(1.008); }
+  .dz-icon { width:60px; height:60px; border-radius:50%; display:grid; place-items:center; margin:0 auto 14px; background:color-mix(in srgb, var(--accent) 14%, transparent); color:var(--accent); transition:transform .2s; }
+  .dz.drag .dz-icon { transform:translateY(-4px) scale(1.08); }
+  .dz-title { font-size:16px; font-weight:650; }
+  .dz-sub { font-size:13px; color:var(--muted); margin-top:5px; }
+  .dz-link { color:var(--accent); font-weight:600; text-decoration:underline; text-underline-offset:3px; }
+  .dz-hint { margin-top:18px; font-size:12px; color:var(--dim); display:flex; gap:7px; justify-content:center; align-items:center; flex-wrap:wrap; }
+  .dz-dot { opacity:.5; }
+  .kbd { font-family:ui-monospace,Consolas,monospace; font-size:11.5px; background:var(--line); color:var(--muted); padding:2px 8px; border-radius:6px; }
+  #bulk.dragging { box-shadow:0 0 0 2px var(--accent); }
+  .fchip { display:flex; align-items:center; gap:14px; padding:12px 14px; border:1px solid var(--line); border-radius:14px; background:var(--bg); }
+  .ficon { width:44px; height:44px; border-radius:12px; display:grid; place-items:center; flex:none; background:var(--b-ok-bg); color:var(--ok); font-size:11px; font-weight:700; letter-spacing:.04em; }
+  .fname { font-weight:600; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .fmeta { font-size:12px; color:var(--muted); margin-top:1px; }
+  .bulk-msg { margin-top:12px; padding:11px 14px; border-radius:12px; font-size:13px; line-height:1.45; }
+  .bulk-msg.err { background:var(--b-bad-bg); color:var(--b-bad-fg); }
+  .bulk-msg b { font-weight:650; }
+  .tablewrap th { position:sticky; top:0; background:var(--panel); z-index:1; }
+  td.miss { color:var(--warn); font-style:italic; }
+  button.primary:disabled { opacity:.4; }
   /* System check */
   .sc { padding:0; overflow:hidden; }
   .sc-head { display:flex; align-items:center; gap:14px; padding:16px 18px; flex-wrap:wrap; }
@@ -232,16 +258,55 @@
     </div>
 
     <div id="bulk" class="card">
-      <h3>📂 Bulk Upload (CSV/Excel)</h3>
-      <input type="file" id="file" accept=".csv,.xlsx,.xls">
-      <div id="bulkInfo" class="msg"></div>
+      <div class="bulk-head">
+        <div style="flex:1;min-width:200px">
+          <div class="bulk-title">Bulk upload</div>
+          <div class="bulk-sub">Add a CSV or Excel file with your candidates, then choose who to download.</div>
+        </div>
+        <button id="sampleBtn" class="ghost" type="button" title="Download an example file you can fill in">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M5 21h14"/></svg>
+          Sample CSV
+        </button>
+      </div>
+
+      <input type="file" id="file" accept=".csv,.xlsx,.xls" hidden>
+
+      <div id="dropzone" class="dz" role="button" tabindex="0" aria-label="Upload a CSV or Excel file">
+        <div class="dz-icon">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M20 16v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3"/></svg>
+        </div>
+        <div class="dz-title" id="dzTitle">Drag &amp; drop your file here</div>
+        <div class="dz-sub">or <span class="dz-link">browse from your computer</span></div>
+        <div class="dz-hint">
+          <span>.csv · .xlsx · .xls</span><span class="dz-dot">•</span>
+          <span>needs the columns</span>
+          <span class="kbd">candidate_id</span><span class="kbd">screen_record_url</span><span class="kbd">webcam_record_url</span>
+        </div>
+      </div>
+
+      <div id="fileChip" class="fchip hidden">
+        <div class="ficon" id="fileExt">CSV</div>
+        <div style="flex:1;min-width:0">
+          <div class="fname" id="fileName"></div>
+          <div class="fmeta" id="fileMeta"></div>
+        </div>
+        <button id="replaceFile" class="ghost" type="button">Replace</button>
+        <button id="removeFile" class="ghost" type="button" title="Remove this file">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          Remove
+        </button>
+      </div>
+
+      <div id="bulkInfo" class="bulk-msg hidden"></div>
+
       <div id="bulkTools" class="hidden">
-        <div class="row" style="margin-top:10px">
-          <b style="flex:1">📋 Candidate List</b>
-          <button id="markAll">Mark All</button><button id="unmarkAll">Unmark All</button>
+        <div id="bulkStats" class="sc-chips" style="padding:14px 0 4px"></div>
+        <div class="row" style="margin-top:6px">
+          <b style="flex:1">Candidate list</b>
+          <button id="markAll" type="button">Select all</button><button id="unmarkAll" type="button">Clear</button>
         </div>
         <div class="tablewrap"><table id="bulkTable"></table></div>
-        <button class="primary" id="startBulk">🚀 Process Selected Candidates</button>
+        <button class="primary" id="startBulk" type="button">Process selected candidates</button>
       </div>
     </div>
 
@@ -714,29 +779,104 @@ function parseCSV(text) {
   const head = rows.shift() || [];
   return rows.filter((r) => r.some((v) => v.trim() !== '')).map((r) => Object.fromEntries(head.map((h, i) => [h, r[i] ?? ''])));
 }
-$('file').onchange = async (e) => {
-  const f = e.target.files[0]; if (!f) return;
-  $('bulkTools').classList.add('hidden');
+const fmtBytes = (n) => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(1) + ' MB';
+function showBulkError(html) { const m = $('bulkInfo'); m.className = 'bulk-msg err'; m.innerHTML = html; }
+function clearBulkMessage() { const m = $('bulkInfo'); m.className = 'bulk-msg hidden'; m.innerHTML = ''; }
+function showDropzone(on) {
+  $('dropzone').classList.toggle('hidden', !on);
+  $('fileChip').classList.toggle('hidden', on);
+}
+function resetBulk() {
+  bulkRows = []; showDropzone(true); $('bulkTools').classList.add('hidden'); clearBulkMessage();
+}
+
+async function handleBulkFile(f) {
+  if (!f) return;
+  clearBulkMessage();
+  if (!/\.(csv|xlsx|xls)$/i.test(f.name)) {
+    showBulkError(`<b>That file type isn't supported.</b> Please use a <b>.csv</b>, <b>.xlsx</b> or <b>.xls</b> file (you chose <b>${esc(f.name)}</b>).`);
+    return;
+  }
   try {
     let data;
-    if (/\.csv$/i.test(f.name)) data = parseCSV((await f.text()).replace(/^﻿/, ''));
+    if (/\.csv$/i.test(f.name)) data = parseCSV((await f.text()).replace(/^\uFEFF/, ''));
     else { const wb = XLSX.read(await f.arrayBuffer()); data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' }); }
     const cols = data.length ? Object.keys(data[0]) : [];
     const find = (k) => cols.find((c) => String(c).toLowerCase().includes(k));
     const idC = find('candidate_id'), sC = find('screen_record_url'), wC = find('webcam_record_url');
-    if (!idC) { $('bulkInfo').textContent = "Could not find 'candidate_id' column."; $('bulkInfo').className = 'msg err'; return; }
-    $('bulkInfo').textContent = `Found columns: ID(${idC}), Screen(${sC}), Webcam(${wC}) — ${data.length} rows`;
-    $('bulkInfo').className = 'msg ok';
+    if (!idC) {
+      showBulkError(`<b>Couldn't find a <code>candidate_id</code> column in ${esc(f.name)}.</b><br>` +
+        (cols.length ? `Columns found: ${cols.map((c) => `<span class="kbd">${esc(c)}</span>`).join(' ')}<br>` : 'The file looks empty.<br>') +
+        'Your first row must contain: <span class="kbd">candidate_id</span> <span class="kbd">screen_record_url</span> <span class="kbd">webcam_record_url</span>. Use “Sample CSV” above for an example.');
+      return;
+    }
     bulkRows = data.filter((r) => String(r[idC]).trim()).map((r) => ({
       on: true, id: String(r[idC]).trim(), s: sC ? String(r[sC]).trim() : '', w: wC ? String(r[wC]).trim() : '',
     }));
+    if (!bulkRows.length) { showBulkError(`<b>No candidates found in ${esc(f.name)}.</b> The <span class="kbd">${esc(idC)}</span> column is empty.`); return; }
+
+    const ext = (f.name.split('.').pop() || '').toUpperCase();
+    $('fileExt').textContent = ext.slice(0, 4);
+    $('fileName').textContent = f.name; $('fileName').title = f.name;
+    const both = bulkRows.filter((r) => r.s && r.w).length;
+    $('fileMeta').textContent = `${fmtBytes(f.size || 0)} · ${bulkRows.length} candidate${bulkRows.length === 1 ? '' : 's'}`;
+    const missing = bulkRows.length - both;
+    $('bulkStats').innerHTML =
+      `<span class="chip ok"><i></i>${bulkRows.length} candidate${bulkRows.length === 1 ? '' : 's'}</span>` +
+      `<span class="chip ok"><i></i>${both} with both links</span>` +
+      (missing ? `<span class="chip warn"><i></i>${missing} missing a link</span>` : '');
+    showDropzone(false);
     renderBulk(); $('bulkTools').classList.remove('hidden');
-  } catch (err) { $('bulkInfo').textContent = 'Error reading file: ' + err.message; $('bulkInfo').className = 'msg err'; }
+  } catch (err) {
+    showBulkError(`<b>Couldn't read ${esc(f.name)}.</b> ${esc(err.message)}`);
+  }
+}
+
+// choose with the file picker
+$('file').onchange = async (e) => { const f = e.target.files[0]; e.target.value = ''; await handleBulkFile(f); };
+$('dropzone').onclick = () => $('file').click();
+$('dropzone').onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('file').click(); } };
+$('replaceFile').onclick = () => $('file').click();
+$('removeFile').onclick = resetBulk;
+
+// drag & drop (anywhere on the card; also stops the browser from opening a file dropped elsewhere)
+{
+  const card = $('bulk'), zone = $('dropzone');
+  const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+  let depth = 0;
+  const setDrag = (on) => { card.classList.toggle('dragging', on); zone.classList.toggle('drag', on); $('dzTitle').innerHTML = on ? 'Drop it here' : 'Drag &amp; drop your file here'; };
+  card.addEventListener('dragenter', (e) => { if (!hasFiles(e)) return; e.preventDefault(); depth++; setDrag(true); });
+  card.addEventListener('dragover', (e) => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+  card.addEventListener('dragleave', (e) => { if (!hasFiles(e)) return; depth = Math.max(0, depth - 1); if (!depth) setDrag(false); });
+  card.addEventListener('drop', async (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault(); depth = 0; setDrag(false);
+    await handleBulkFile(e.dataTransfer.files[0]);   // one file at a time (the first, if several are dropped)
+  });
+  for (const ev of ['dragover', 'drop'])
+    window.addEventListener(ev, (e) => { if (hasFiles(e) && !e.target.closest?.('#bulk')) e.preventDefault(); });
+}
+
+// sample file
+$('sampleBtn').onclick = () => {
+  const csv = 'candidate_id,screen_record_url,webcam_record_url\r\n1217,https://example.com/1217_screen.webm,https://example.com/1217_webcam.webm\r\n1218,https://example.com/1218_screen.webm,https://example.com/1218_webcam.webm\r\n';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'sample_candidates.csv';
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 };
+
+function updateBulkCount() {
+  const n = bulkRows.filter((r) => r.on).length;
+  const b = $('startBulk');
+  b.disabled = n === 0;
+  b.textContent = n === 0 ? 'Select at least one candidate' : `Process ${n} selected candidate${n === 1 ? '' : 's'}`;
+}
 function renderBulk() {
-  $('bulkTable').innerHTML = '<tr><th>Process</th><th>Candidate ID</th><th>Screen URL</th><th>Webcam URL</th></tr>' +
-    bulkRows.map((r, i) => `<tr><td><input type="checkbox" data-i="${i}" ${r.on ? 'checked' : ''}></td><td>${esc(r.id)}</td><td title="${esc(r.s)}">${esc(r.s)}</td><td title="${esc(r.w)}">${esc(r.w)}</td></tr>`).join('');
-  $('bulkTable').querySelectorAll('input').forEach((c) => c.onchange = () => { bulkRows[c.dataset.i].on = c.checked; });
+  const cell = (v) => v ? `<td title="${esc(v)}">${esc(v)}</td>` : '<td class="miss">missing</td>';
+  $('bulkTable').innerHTML = '<tr><th style="width:70px">Process</th><th>Candidate ID</th><th>Screen URL</th><th>Webcam URL</th></tr>' +
+    bulkRows.map((r, i) => `<tr><td><input type="checkbox" data-i="${i}" ${r.on ? 'checked' : ''}></td><td>${esc(r.id)}</td>${cell(r.s)}${cell(r.w)}</tr>`).join('');
+  $('bulkTable').querySelectorAll('input').forEach((c) => c.onchange = () => { bulkRows[c.dataset.i].on = c.checked; updateBulkCount(); });
+  updateBulkCount();
 }
 $('markAll').onclick = () => { bulkRows.forEach((r) => r.on = true); renderBulk(); };
 $('unmarkAll').onclick = () => { bulkRows.forEach((r) => r.on = false); renderBulk(); };
