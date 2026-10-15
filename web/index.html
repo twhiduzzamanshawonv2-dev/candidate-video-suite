@@ -123,6 +123,16 @@
   .tablewrap th { position:sticky; top:0; background:var(--panel); z-index:1; }
   td.miss { color:var(--warn); font-style:italic; }
   button.primary:disabled { opacity:.4; }
+  /* Column check (smart column matching) */
+  .colmap { margin-top:14px; border:1px solid var(--line); border-radius:14px; padding:14px 16px 6px; background:var(--bg); }
+  .cm-title { font-weight:650; font-size:14px; }
+  .cm-sub { color:var(--muted); font-size:12.5px; margin:2px 0 8px; }
+  .cm-row { display:grid; grid-template-columns:200px minmax(170px,1fr) minmax(0,1.3fr); gap:10px; align-items:center; padding:9px 0; border-top:1px solid var(--line); }
+  .cm-field { display:flex; flex-direction:column; gap:3px; min-width:0; }
+  .cm-field b { font-size:13px; font-weight:600; }
+  .cm-row select { width:100%; min-width:0; }
+  .cm-note { min-width:0; }
+  @media (max-width:700px) { .cm-row { grid-template-columns:1fr; gap:6px; } }
   /* System check */
   .sc { padding:0; overflow:hidden; }
   .sc-head { display:flex; align-items:center; gap:14px; padding:16px 18px; flex-wrap:wrap; }
@@ -279,7 +289,7 @@
         <div class="dz-sub">or <span class="dz-link">browse from your computer</span></div>
         <div class="dz-hint">
           <span>.csv · .xlsx · .xls</span><span class="dz-dot">•</span>
-          <span>needs the columns</span>
+          <span>columns (small typos are fine)</span>
           <span class="kbd">candidate_id</span><span class="kbd">screen_record_url</span><span class="kbd">webcam_record_url</span>
         </div>
       </div>
@@ -300,6 +310,7 @@
       <div id="bulkInfo" class="bulk-msg hidden"></div>
 
       <div id="bulkTools" class="hidden">
+        <div id="colMap" class="colmap hidden"></div>
         <div id="bulkStats" class="sc-chips" style="padding:14px 0 4px"></div>
         <div class="row" style="margin-top:6px">
           <b style="flex:1">Candidate list</b>
@@ -788,8 +799,146 @@ function showDropzone(on) {
   $('fileChip').classList.toggle('hidden', on);
 }
 function resetBulk() {
-  bulkRows = []; showDropzone(true); $('bulkTools').classList.add('hidden'); clearBulkMessage();
+  bulkRows = []; bulkSource = null; bulkMap = {};
+  showDropzone(true); $('bulkTools').classList.add('hidden'); $('colMap').classList.add('hidden'); clearBulkMessage();
 }
+
+/* ── Smart column matching: typos, other names, or guessing from what the data looks like ── */
+const FIELDS = [
+  { key: 'id', name: 'candidate_id', label: 'Candidate ID', required: true, canon: 'candidateid',
+    aliases: ['id', 'cid', 'candidate', 'candidateno', 'candidatenumber', 'candidatecode', 'applicantid', 'applicant', 'userid', 'employeeid', 'empid', 'rollno', 'rollnumber', 'serialno', 'srno'],
+    words: [] },
+  { key: 's', name: 'screen_record_url', label: 'Screen recording link', canon: 'screenrecordurl',
+    aliases: ['screenurl', 'screenrecord', 'screenrecording', 'screenlink', 'screenvideo', 'screenvideourl', 'screenrecordlink', 'screencapture', 'screen', 'desktoprecording', 'desktopurl'],
+    words: ['screen', 'desktop'] },
+  { key: 'w', name: 'webcam_record_url', label: 'Webcam recording link', canon: 'webcamrecordurl',
+    aliases: ['webcamurl', 'webcamrecord', 'webcamrecording', 'webcamlink', 'webcamvideo', 'webcamvideourl', 'webcamrecordlink', 'camurl', 'camlink', 'cameraurl', 'camera', 'webcam', 'facecam', 'facevideo', 'cam'],
+    words: ['webcam', 'camera', 'facecam'] },
+];
+const normName = (v) => String(v).replace(/^\uFEFF/, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+function lev(a, b) {
+  const m = a.length, n = b.length; if (!m) return n; if (!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[n];
+}
+const similarity = (a, b) => 1 - lev(a, b) / Math.max(a.length, b.length, 1);
+
+function scoreColumn(field, raw) {
+  const n = normName(raw);
+  if (!n) return { score: 0 };
+  if (n === field.canon) return { score: 1, kind: 'exact' };               // also covers "Candidate ID", "candidate-id", …
+  if (field.aliases.includes(n)) return { score: 0.93, kind: 'similar', why: 'a common name for this' };
+  let best = { score: 0 };
+  const consider = (score, why) => { if (score > best.score) best = { score, kind: 'similar', why }; };
+  for (const k of [field.canon, ...field.aliases.filter((x) => x.length >= 6)]) {
+    const r = similarity(n, k);
+    if (r >= 0.75) consider(r * 0.97, 'looks like a typo');
+  }
+  if (n.includes(field.canon)) consider(0.9, 'similar name');
+  if (field.words.some((w) => n.includes(w))) consider(0.78, 'its name mentions it');
+  return best;
+}
+
+function guessMapping(cols, rows) {
+  const used = new Set(), map = {}, cand = [];
+  for (const f of FIELDS) for (const c of cols) { const r = scoreColumn(f, c); if (r.score >= 0.72) cand.push({ f: f.key, c, ...r }); }
+  cand.sort((x, y) => y.score - x.score);
+  for (const x of cand) if (!map[x.f] && !used.has(x.c)) { map[x.f] = { col: x.c, kind: x.kind, why: x.why }; used.add(x.c); }
+
+  // Still unmatched: look at what is inside the columns
+  const info = (c) => {
+    const vals = rows.map((r) => String(r[c] ?? '').trim()).filter(Boolean), n = vals.length || 1;
+    return { c, has: vals.length > 0, urlShare: vals.filter((v) => /^https?:\/\//i.test(v)).length / n,
+             unique: new Set(vals).size / n, avgLen: vals.reduce((t, v) => t + v.length, 0) / n, sample: vals.slice(0, 25).join(' ').toLowerCase() };
+  };
+  const free = cols.filter((c) => !used.has(c)).map(info);
+  const urlCols = free.filter((x) => x.urlShare >= 0.6);
+  for (const key of ['s', 'w']) {
+    if (map[key] || !urlCols.length) continue;
+    const word = key === 's' ? 'screen' : 'cam';
+    const pick = urlCols.find((x) => x.sample.includes(word)) || urlCols[0];
+    map[key] = { col: pick.c, kind: 'guess', why: 'its values are links' };
+    used.add(pick.c); urlCols.splice(urlCols.indexOf(pick), 1);
+  }
+  if (!map.id) {
+    const pick = free.filter((x) => !used.has(x.c) && x.has && x.urlShare < 0.3 && x.avgLen <= 24 && x.unique >= 0.9)
+                     .sort((x, y) => cols.indexOf(x.c) - cols.indexOf(y.c))[0];
+    if (pick) { map.id = { col: pick.c, kind: 'guess', why: 'its values look like unique IDs' }; used.add(pick.c); }
+  }
+  return map;
+}
+
+let bulkSource = null, bulkMap = {};
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+
+function applyMapping() {
+  const idC = bulkMap.id?.col, sC = bulkMap.s?.col, wC = bulkMap.w?.col;
+  const val = (r, c) => (c ? String(r[c] ?? '').trim() : '');
+  bulkRows = idC ? bulkSource.data.filter((r) => val(r, idC)).map((r) => ({ on: true, id: val(r, idC), s: val(r, sC), w: val(r, wC) })) : [];
+  $('fileMeta').textContent = `${fmtBytes(bulkSource.file.size || 0)} · ${plural(bulkRows.length, 'candidate')}`;
+
+  const both = bulkRows.filter((r) => r.s && r.w).length, missing = bulkRows.length - both;
+  let chips = '';
+  if (!idC) chips += '<span class="chip bad"><i></i>Choose the candidate ID column</span>';
+  else chips += `<span class="chip ok"><i></i>${plural(bulkRows.length, 'candidate')}</span>` +
+                `<span class="chip ok"><i></i>${both} with both links</span>` +
+                (missing ? `<span class="chip warn"><i></i>${missing} missing a link</span>` : '');
+  if (idC && !sC && !wC) chips += '<span class="chip bad"><i></i>No link columns found</span>';
+  else if (idC && !sC) chips += '<span class="chip warn"><i></i>No screen link column</span>';
+  else if (idC && !wC) chips += '<span class="chip warn"><i></i>No webcam link column</span>';
+  $('bulkStats').innerHTML = chips;
+
+  renderColMap(); renderBulk();
+}
+
+function renderColMap() {
+  const cols = bulkSource.cols, box = $('colMap');
+  const rows = FIELDS.map((f) => ({ f, m: bulkMap[f.key] }));
+  const needsLook = rows.some((x) => x.m && x.m.kind !== 'exact' && x.m.kind !== 'manual');
+  const noId = !bulkMap.id, noLinks = !bulkMap.s && !bulkMap.w;
+  if (!needsLook && !noId && !noLinks && !box.dataset.open) { box.classList.add('hidden'); return; }
+  box.dataset.open = '1';   // once shown, keep it while the person adjusts columns
+
+  const fixed = rows.filter((x) => x.m && (x.m.kind === 'similar' || x.m.kind === 'guess')).length;
+  const title = noId ? 'Choose the column that has the candidate IDs'
+              : noLinks ? 'Choose the columns that have the video links'
+              : fixed ? `We matched your columns – ${plural(fixed, 'name')} didn't match exactly`
+              : 'Your columns';
+  const sub = noId || noLinks ? 'We could not tell which columns to use. Pick them from the lists below.'
+            : 'Check these look right. You can change any of them.';
+  const badge = (x) => {
+    const m = x.m;
+    if (!m) return x.f.required ? '<span class="chip bad"><i></i>Not found – please choose</span>' : '<span class="chip"><i></i>Not in your file</span>';
+    if (m.kind === 'exact') return '<span class="chip ok"><i></i>Exact match</span>';
+    if (m.kind === 'manual') return '<span class="chip ok"><i></i>You chose this</span>';
+    return `<span class="chip warn"><i></i>Guessed – ${esc(m.why)}</span>`.replace('Guessed –', m.kind === 'similar' ? 'Matched –' : 'Guessed –');
+  };
+  box.innerHTML = `<div class="cm-title">${esc(title)}</div><div class="cm-sub">${esc(sub)}</div>` + rows.map((x) => `
+    <div class="cm-row">
+      <div class="cm-field"><b>${esc(x.f.label)}</b><span class="kbd" style="align-self:flex-start">${esc(x.f.name)}</span></div>
+      <select data-field="${x.f.key}" aria-label="Column for ${esc(x.f.label)}">
+        <option value="">${x.f.required ? '— choose a column —' : '— not in my file —'}</option>
+        ${cols.map((c) => `<option value="${esc(c)}" ${x.m && x.m.col === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}
+      </select>
+      <div class="cm-note">${badge(x)}</div>
+    </div>`).join('');
+  box.classList.remove('hidden');
+}
+$('colMap').addEventListener('change', (e) => {
+  const sel = e.target.closest('select[data-field]'); if (!sel || !bulkSource) return;
+  const key = sel.dataset.field, col = sel.value;
+  if (!col) delete bulkMap[key];
+  else {
+    for (const k of Object.keys(bulkMap)) if (k !== key && bulkMap[k].col === col) delete bulkMap[k];   // a column can only serve one purpose
+    bulkMap[key] = { col, kind: 'manual' };
+  }
+  applyMapping();
+});
 
 async function handleBulkFile(f) {
   if (!f) return;
@@ -803,31 +952,20 @@ async function handleBulkFile(f) {
     if (/\.csv$/i.test(f.name)) data = parseCSV((await f.text()).replace(/^\uFEFF/, ''));
     else { const wb = XLSX.read(await f.arrayBuffer()); data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' }); }
     const cols = data.length ? Object.keys(data[0]) : [];
-    const find = (k) => cols.find((c) => String(c).toLowerCase().includes(k));
-    const idC = find('candidate_id'), sC = find('screen_record_url'), wC = find('webcam_record_url');
-    if (!idC) {
-      showBulkError(`<b>Couldn't find a <code>candidate_id</code> column in ${esc(f.name)}.</b><br>` +
-        (cols.length ? `Columns found: ${cols.map((c) => `<span class="kbd">${esc(c)}</span>`).join(' ')}<br>` : 'The file looks empty.<br>') +
-        'Your first row must contain: <span class="kbd">candidate_id</span> <span class="kbd">screen_record_url</span> <span class="kbd">webcam_record_url</span>. Use “Sample CSV” above for an example.');
+    if (!cols.length || !data.length) {
+      showBulkError(`<b>${esc(f.name)} looks empty.</b> It needs a first row with column names, then one row per candidate. Use “Sample CSV” above for an example.`);
       return;
     }
-    bulkRows = data.filter((r) => String(r[idC]).trim()).map((r) => ({
-      on: true, id: String(r[idC]).trim(), s: sC ? String(r[sC]).trim() : '', w: wC ? String(r[wC]).trim() : '',
-    }));
-    if (!bulkRows.length) { showBulkError(`<b>No candidates found in ${esc(f.name)}.</b> The <span class="kbd">${esc(idC)}</span> column is empty.`); return; }
+    bulkSource = { file: f, data, cols };
+    bulkMap = guessMapping(cols, data);
+    $('colMap').dataset.open = '';
 
     const ext = (f.name.split('.').pop() || '').toUpperCase();
     $('fileExt').textContent = ext.slice(0, 4);
     $('fileName').textContent = f.name; $('fileName').title = f.name;
-    const both = bulkRows.filter((r) => r.s && r.w).length;
-    $('fileMeta').textContent = `${fmtBytes(f.size || 0)} · ${bulkRows.length} candidate${bulkRows.length === 1 ? '' : 's'}`;
-    const missing = bulkRows.length - both;
-    $('bulkStats').innerHTML =
-      `<span class="chip ok"><i></i>${bulkRows.length} candidate${bulkRows.length === 1 ? '' : 's'}</span>` +
-      `<span class="chip ok"><i></i>${both} with both links</span>` +
-      (missing ? `<span class="chip warn"><i></i>${missing} missing a link</span>` : '');
     showDropzone(false);
-    renderBulk(); $('bulkTools').classList.remove('hidden');
+    $('bulkTools').classList.remove('hidden');
+    applyMapping();
   } catch (err) {
     showBulkError(`<b>Couldn't read ${esc(f.name)}.</b> ${esc(err.message)}`);
   }
