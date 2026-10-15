@@ -254,7 +254,7 @@ function updateStatus(info) {
   const ph = connected ? 'Type or paste a folder path, or click Browse' : 'Click Browse to choose a folder (typing needs the local helper)';
   $('folderDl').placeholder = $('folderRv').placeholder = ph;
 }
-const MIN_HELPER = 1.4;   // oldest helper version this page works well with
+const MIN_HELPER = 1.5;   // oldest helper version this page works well with
 let folder = '', helperInfo = null, wasmOk = null;
 function renderChecks() {
   const ua = navigator.userAgent;
@@ -267,7 +267,7 @@ function renderChecks() {
     { s: connected ? (parseFloat(helperInfo?.version) >= MIN_HELPER ? 'ok' : 'warn') : 'warn', t: 'Local helper',
       d: connected ? (parseFloat(helperInfo?.version) >= MIN_HELPER
                       ? `Running (v${helperInfo?.version}) – downloads go straight to this PC`
-                      : `Running v${helperInfo?.version || '?'} but OUTDATED (need v${MIN_HELPER}) – run Setup again to update (fixes duplicate folder windows)`)
+                      : `Running v${helperInfo?.version || '?'} but OUTDATED (need v${MIN_HELPER}) – run Setup again to update (fixes extra folder windows)`)
                    : 'Not detected – required for links that block browsers (CORS). Download the setup below, or click Re-check if it is already installed' },
     { s: !connected ? 'wait' : helperInfo?.python ? 'ok' : 'warn', t: 'Python',
       d: !connected ? 'Checked once the helper is running' : helperInfo?.python ? 'Python ' + helperInfo.python : 'Unknown' },
@@ -399,8 +399,17 @@ function paintBrowse() {
     $(id).textContent = browsePending ? '⏳ Folder window open…' : browseStarting ? '⏳ Connecting to helper…' : BROWSE_LABELS[id];
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let raising = false;
+function raiseFolderWindow() {
+  // One quick request at a time: piling up long-waiting requests fills Chrome's 6-connection limit,
+  // and the queued ones would later open NEW windows one by one as each window is cancelled.
+  if (raising) return;
+  raising = true;
+  post('/api/browse/raise').catch(() => {}).finally(() => { raising = false; });
+}
 async function browse(after) {
   if (browseStarting) return;
+  if (browsePending) { raiseFolderWindow(); return; }
   try {
     if (!browsePending && !useHelper()) {
       // Don't trust a stale "not connected": re-check now and try to start the helper first
@@ -417,7 +426,7 @@ async function browse(after) {
     if (connected && !outdatedWarned && parseFloat(helperInfo?.version) < MIN_HELPER) {
       outdatedWarned = true;
       alert('Your local helper is outdated (v' + (helperInfo?.version || '?') + ', need v' + MIN_HELPER + ').' + String.fromCharCode(10, 10) +
-        'Old helpers open a new folder window on every click. Run the setup command again (see System check at the top), then click Re-check.');
+        'Old helpers can open extra folder windows. Run the setup command again (see System check at the top), then click Re-check.');
     }
     if (useHelper() || browsePending) {
       // While the Windows folder window is open, extra clicks just bring it to the front

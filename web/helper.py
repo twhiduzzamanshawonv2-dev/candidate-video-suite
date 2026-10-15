@@ -212,7 +212,7 @@ def ffmpeg_version():
 def ping():
     return {
         "ok": True,
-        "version": "1.4",
+        "version": "1.5",
         "python": sys.version.split()[0],
         "ffmpeg": FFMPEG is not None,
         "ffmpeg_version": ffmpeg_version() or "",
@@ -311,6 +311,20 @@ def browse():
     finally:
         _browse_state["proc"] = None
         _browse_lock.release()
+
+
+@app.post("/api/browse/raise")
+def browse_raise():
+    """Bring the open folder window to the front and return right away (never opens a window)."""
+    proc = _browse_state["proc"]
+    if proc is None or proc.poll() is not None:
+        return {"raised": False}
+    try:
+        subprocess.run(_powershell(_FRONT_SCRIPT.replace("__PID__", str(proc.pid))),
+                       capture_output=True, timeout=15, creationflags=NOWIN)
+    except Exception:
+        return {"raised": False}
+    return {"raised": True}
 
 
 @app.post("/api/jobs")
