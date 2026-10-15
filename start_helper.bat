@@ -32,6 +32,7 @@ echo [+] Installing libraries...
 !PY_CMD! -m pip install fastapi uvicorn requests
 
 echo [+] Starting helper. Keep this window open while using the web page.
-!PY_CMD! "%~dp0helper.py"
+!PY_CMD! "%~dp0web\helper.py"
 
 pause
+

