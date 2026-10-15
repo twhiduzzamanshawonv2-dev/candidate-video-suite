@@ -105,23 +105,64 @@ async def origin_guard(request: Request, call_next):
 JOBS = {}
 
 
+def _seconds(text):
+    """Largest positive number in the text, else 0 ('N/A' and blanks are ignored)."""
+    best = 0.0
+    for line in str(text).splitlines():
+        try:
+            best = max(best, float(line.strip().split(",")[0]))
+        except ValueError:
+            pass
+    return best
+
+
 def get_video_duration(path):
+    """Length in seconds, or 0 if it can't be worked out.
+
+    Videos recorded in a browser (WebM) usually store no length at all, so ffprobe says N/A and a
+    percentage can't be shown. In that case read the timestamps of the video packets (no decoding, fast).
+    """
+    probe = FFPROBE or "ffprobe"
     try:
-        out = subprocess.run(
-            [FFPROBE or "ffprobe", "-v", "error", "-show_entries", "format=duration",
-             "-of", "default=noprint_wrappers=1:nokey=1", path],
-            capture_output=True, text=True, check=True, creationflags=NOWIN,
-        )
-        return float(out.stdout.strip())
+        for entry in ("format=duration", "stream=duration"):
+            out = subprocess.run(
+                [probe, "-v", "error", "-show_entries", entry, "-of", "default=noprint_wrappers=1:nokey=1", path],
+                capture_output=True, text=True, timeout=60, creationflags=NOWIN)
+            d = _seconds(out.stdout)
+            if d > 0:
+                return d
+    except Exception:
+        pass
+    try:
+        proc = subprocess.Popen(
+            [probe, "-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time", "-of", "csv=p=0", path],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, creationflags=NOWIN)
+        last, deadline = 0.0, time.time() + 90
+        for line in proc.stdout:
+            try:
+                last = max(last, float(line.strip().split(",")[0]))
+            except ValueError:
+                pass
+            if time.time() > deadline:
+                proc.kill()
+                break
+        proc.wait()
+        return last
     except Exception:
         return 0
 
 
+def _clock(seconds):
+    seconds = int(max(0, seconds))
+    return f"{seconds // 60}:{seconds % 60:02d}"
+
+
 def convert_to_mp4(src, preset, f):
     dst = src.replace(".webm", ".mp4")
-    duration = get_video_duration(src)
     f["status"] = "converting"
-    f["progress"] = 0
+    f["progress"], f["detail"] = -1, "checking video length…"
+    duration = get_video_duration(src)
+    f["progress"], f["detail"] = (0, f"0:00 / {_clock(duration)}") if duration > 0 else (-1, "0:00 of video converted")
     cmd = [FFMPEG or "ffmpeg", "-y", "-i", src, "-c:v", "libx264", "-crf", "23",
            "-preset", preset, "-c:a", "aac", "-progress", "pipe:1", dst]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -130,10 +171,14 @@ def convert_to_mp4(src, preset, f):
         if "out_time_ms=" in line or "out_time_us=" in line:
             try:
                 secs = int(line.split("=")[1].strip()) / 1_000_000
-                if duration > 0:
-                    f["progress"] = min(100, int(secs / duration * 100))
             except ValueError:
-                pass
+                continue
+            if duration > 0:
+                f["progress"] = min(99, int(secs / duration * 100))      # 100 only when it has really finished
+                f["detail"] = f"{_clock(secs)} / {_clock(duration)}"
+            else:
+                f["progress"] = -1                                       # length unknown: page shows a moving bar
+                f["detail"] = f"{_clock(secs)} of video converted"
     proc.wait()
     if proc.returncode != 0:
         raise RuntimeError("FFmpeg error")
@@ -165,6 +210,10 @@ def process_file(f, folder, mode, preset):
                     done += len(chunk)
                     if total:
                         f["progress"] = min(100, int(done / total * 100))
+                        f["detail"] = f"{done / 1048576:.1f} / {total / 1048576:.1f} MB"
+                    else:                                                # server did not say how big it is
+                        f["progress"] = -1
+                        f["detail"] = f"{done / 1048576:.1f} MB downloaded"
 
         if mode == "convert":
             convert_to_mp4(download_path, preset, f)
@@ -212,7 +261,7 @@ def ffmpeg_version():
 def ping():
     return {
         "ok": True,
-        "version": "1.6",
+        "version": "1.7",
         "python": sys.version.split()[0],
         "ffmpeg": FFMPEG is not None,
         "ffmpeg_version": ffmpeg_version() or "",
@@ -466,7 +515,7 @@ def create_job(req: JobRequest):
         for kind, url in (("screenrecord", item.screen_url), ("webcam", item.webcam_url)):
             if url:
                 files.append({"cid": cid, "kind": kind, "name": f"{cid}_{kind}", "url": url,
-                              "folder": cdir, "status": "queued", "progress": 0, "message": ""})
+                              "folder": cdir, "status": "queued", "progress": 0, "message": "", "detail": ""})
 
     job_id = uuid.uuid4().hex
     job = {"id": job_id, "mode": req.mode, "preset": req.preset,
@@ -484,7 +533,7 @@ def job_status(job_id: str):
         raise HTTPException(404, "Unknown job")
     return {
         "finished": job["finished"],
-        "files": [{k: f[k] for k in ("cid", "kind", "status", "progress", "message")}
+        "files": [{k: f[k] for k in ("cid", "kind", "status", "progress", "message", "detail")}
                   for f in job["files"]],
     }
 

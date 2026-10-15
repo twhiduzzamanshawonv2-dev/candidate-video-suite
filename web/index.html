@@ -84,6 +84,9 @@
   .bar > i { display:block; height:100%; background:var(--accent); width:0; transition:width .3s; }
   .bar.done > i { background:var(--ok); }
   .bar.failed > i { background:var(--err); }
+  .bar.indet > i { width:38% !important; animation:cv-indet 1.3s ease-in-out infinite; }
+  @keyframes cv-indet { 0% { transform:translateX(-110%); } 100% { transform:translateX(280%); } }
+  @media (prefers-reduced-motion: reduce) { .bar.indet > i { animation:none; width:100% !important; opacity:.5; } }
   .msg { font-size:13px; margin-top:8px; }
   .msg.ok { color:var(--ok); } .msg.err { color:var(--err); }
   .stats { display:flex; gap:24px; margin:10px 0; }
@@ -686,9 +689,15 @@ async function runJob(items) {
   }, 700);
 }
 function renderJob(s) {
-  $('jobFiles').innerHTML = s.files.map((f) => `
-    <div class="prog"><div class="t"><span>${esc(f.cid)} · ${f.kind}</span><span>${f.status}${f.message ? ' – ' + esc(f.message) : ''} ${f.progress}%</span></div>
-    <div class="bar ${f.status === 'done' || f.status === 'exists' ? 'done' : f.status}"><i style="width:${f.progress}%"></i></div></div>`).join('');
+  $('jobFiles').innerHTML = s.files.map((f) => {
+    const unknown = f.progress < 0;                      // size / length not known: show a moving bar instead of a stuck 0%
+    const busy = f.status === 'downloading' || f.status === 'converting';
+    const pct = unknown ? '' : f.progress + '%';
+    const cls = f.status === 'done' || f.status === 'exists' ? 'done' : f.status;
+    return `
+    <div class="prog"><div class="t"><span>${esc(f.cid)} · ${f.kind}</span><span>${f.status}${f.message ? ' – ' + esc(f.message) : ''} ${[pct, busy && f.detail ? esc(f.detail) : ''].filter(Boolean).join(' · ')}</span></div>
+    <div class="bar ${cls}${unknown && busy ? ' indet' : ''}"><i style="width:${Math.max(0, f.progress)}%"></i></div></div>`;
+  }).join('');
   const done = s.files.filter((f) => ['done', 'exists', 'failed'].includes(f.status)).length;
   $('overallLabel').textContent = `Overall Progress (${done}/${s.files.length} files)`;
   $('overallBar').firstElementChild.style.width = (done / s.files.length * 100) + '%';
@@ -720,7 +729,7 @@ function getFFmpeg() {
   if (!ffPromise) ffPromise = (async () => {
     await loadScript('vendor/ffmpeg.js');
     const ff = new FFmpegWASM.FFmpeg();
-    ff.on('progress', ({ progress }) => { if (ffCurrent) ffCurrent.progress = Math.max(0, Math.min(100, Math.round(progress * 100))); });
+    ff.on('progress', ({ progress }) => { if (ffCurrent && progress > 0 && progress <= 1) ffCurrent.progress = Math.min(99, Math.round(progress * 100)); });
     await ff.load({
       coreURL: new URL('vendor/ffmpeg-core.js', location.href).href,
       wasmURL: new URL('vendor/ffmpeg-core.wasm', location.href).href,
@@ -736,7 +745,7 @@ async function writeBlob(dir, name, data) {
 function convertInBrowser(cdir, f, preset) {
   // One conversion at a time: a single wasm instance (and its memory) is shared
   const task = ffChain.then(async () => {
-    f.status = 'converting'; f.progress = 0; ffCurrent = f;
+    f.status = 'converting'; f.progress = -1; f.detail = 'converting…'; ffCurrent = f;   // moving bar until a real percentage arrives
     const ff = await getFFmpeg();
     try {
       const file = await (await cdir.getFileHandle(f.name + '.webm')).getFile();
