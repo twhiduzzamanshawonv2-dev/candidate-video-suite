@@ -370,8 +370,20 @@ async function processInBrowser(f, mode, preset) {
     try { await cdir.getFileHandle(f.name + ext); f.status = 'exists'; f.progress = 100; f.message = 'Already downloaded'; return; } catch {}
     tmpName = mode === 'rename' ? f.name + '.mp4' : f.name + '.webm';
     f.status = 'downloading';
-    const resp = await fetch(f.url);
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    let resp;
+    try { resp = await fetch(f.url); }
+    catch (e) {
+      if (!(e instanceof TypeError)) throw e;
+      // Source blocks browser downloads (CORS): retry through the site's own proxy
+      resp = await fetch('/api/proxy?url=' + encodeURIComponent(f.url));
+      if (resp.status === 404 && !(resp.headers.get('content-type') || '').startsWith('video')) {
+        const t = await resp.text();
+        if (t.startsWith('<') || !t) throw new TypeError('no proxy');
+        throw new Error(t);
+      }
+      f.message = 'via server proxy';
+    }
+    if (!resp.ok) throw new Error(resp.status === 502 || resp.status === 400 || resp.status === 403 ? await resp.text() : 'HTTP ' + resp.status);
     const total = +resp.headers.get('content-length') || 0;
     w = await (await cdir.getFileHandle(tmpName, { create: true })).createWritable();
     const reader = resp.body.getReader(); let got = 0;
