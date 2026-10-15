@@ -76,6 +76,12 @@
   .mono { font-family:ui-monospace,Consolas,monospace; color:var(--dim); font-size:11px; }
   input[type=range] { flex:1; accent-color:#fafafa; }
   .syncdot { width:6px; height:6px; border-radius:50%; background:var(--ok); } .syncdot.warn { background:var(--warn); }
+  .chk { display:flex; gap:10px; padding:7px 0; border-top:1px solid var(--line); font-size:13px; }
+  .chk:first-child { border-top:0; }
+  .chk .ic { width:20px; text-align:center; }
+  .chk .tt { font-weight:500; } .chk .dd { color:var(--muted); font-size:12px; }
+  .badge { font-size:11px; padding:2px 8px; border-radius:99px; margin-left:8px; font-weight:500; }
+  .badge.ok { background:#052e16; color:#86efac; } .badge.warn { background:#451a03; color:#fcd34d; } .badge.bad { background:#450a0a; color:#fca5a5; }
   .empty { height:300px; display:flex; align-items:center; justify-content:center; color:var(--line2); }
 </style>
 </head>
@@ -94,6 +100,15 @@
   <div id="setup" class="banner hidden">
     <b>This browser can't access local folders.</b>
     Open this page in <b>Chrome or Edge</b> (desktop). Nothing needs to be installed.
+  </div>
+
+  <div id="checks" class="card narrow">
+    <div class="row"><b style="flex:1">System check <span id="checkSummary" class="badge"></span></b><button id="recheck">Re-check</button></div>
+    <div id="checkList" style="margin-top:6px"></div>
+    <div id="checkSetup" class="dd hidden" style="margin-top:8px;color:var(--muted);font-size:12px">
+      Helper missing? <a href="CandidateHelperSetup.zip" download style="color:var(--accent)">Download the one-time setup</a>,
+      unzip and double-click <b>Setup.bat</b> (Python and FFmpeg are installed automatically), then click Re-check.
+    </div>
   </div>
 
   <div id="helperBanner" class="banner hidden">
@@ -223,8 +238,41 @@ function updateStatus(info) {
   $('setup').classList.toggle('hidden', ok);
   $('folderDl').readOnly = $('folderRv').readOnly = !connected;
 }
+let helperInfo = null, wasmOk = null;
+function renderChecks() {
+  const ua = navigator.userAgent;
+  const chromium = /Chrome\/|Edg\//.test(ua) && !/Mobile/.test(ua);
+  const items = [
+    { s: hasFS && chromium ? 'ok' : 'bad', t: 'Browser',
+      d: hasFS && chromium ? 'Chrome/Edge on desktop – folder access supported' : 'Open this page in desktop Chrome or Edge' },
+    { s: wasmOk === null ? 'wait' : wasmOk ? 'ok' : 'warn', t: 'In-browser converter',
+      d: wasmOk === null ? 'Checking…' : wasmOk ? 'FFmpeg.wasm bundle available (slow fallback)' : 'FFmpeg.wasm files could not be loaded' },
+    { s: connected ? 'ok' : 'warn', t: 'Local helper',
+      d: connected ? `Running (v${helperInfo?.version || '?'}) – downloads go straight to this PC`
+                   : 'Not detected – required for links that block browsers (CORS). Download the setup below, or click Re-check if it is already installed' },
+    { s: !connected ? 'wait' : helperInfo?.python ? 'ok' : 'warn', t: 'Python',
+      d: !connected ? 'Checked once the helper is running' : helperInfo?.python ? 'Python ' + helperInfo.python : 'Unknown' },
+    { s: !connected ? 'wait' : helperInfo?.ffmpeg ? 'ok' : 'bad', t: 'FFmpeg (fast conversion)',
+      d: !connected ? 'Checked once the helper is running'
+        : helperInfo?.ffmpeg ? (helperInfo.ffmpeg_version || 'Installed') + (helperInfo.ffprobe ? '' : ' – ffprobe missing (progress % unavailable)')
+        : 'Not installed – re-run Setup.bat (or: winget install GYAN.FFmpeg). Convert mode needs it' },
+    { s: folder ? 'ok' : 'wait', t: 'Download folder',
+      d: folder ? folder : 'Not selected yet – use Browse' },
+  ];
+  const icon = { ok: '✅', bad: '❌', warn: '⚠️', wait: '⚪' };
+  $('checkList').innerHTML = items.map((i) => `<div class="chk"><span class="ic">${icon[i.s]}</span><div><div class="tt">${i.t}</div><div class="dd">${esc(i.d)}</div></div></div>`).join('');
+  const bad = items.some((i) => i.s === 'bad'), warn = items.some((i) => i.s === 'warn');
+  $('checkSetup').classList.toggle('hidden', connected);
+  const sum = $('checkSummary');
+  sum.className = 'badge ' + (bad ? 'bad' : warn ? 'warn' : 'ok');
+  sum.textContent = bad ? 'Action needed' : warn ? 'Helper recommended' : 'All good';
+}
+function runWasmCheck() {
+  fetch('vendor/ffmpeg-core.wasm', { method: 'HEAD' }).then((r) => { wasmOk = r.ok; renderChecks(); }).catch(() => { wasmOk = false; renderChecks(); });
+}
 function setConnected(ok, info) {
-  const was = connected; connected = ok;
+  const was = connected; connected = ok; helperInfo = ok ? info : null;
+  renderChecks();
   updateStatus(info);
   if (ok) $('helperBanner').classList.add('hidden');
   if (ok !== was) { setFolder(ok ? store.get('folder', '') : (dirHandle ? dirHandle.name : '')); cur = null; loadCandidates(); }
@@ -244,7 +292,9 @@ $('helperRetry').onclick = async () => {
   if (!connected) { launchHelper(); await new Promise((r) => setTimeout(r, 3000)); await checkHelper(); }
   $('helperRetryMsg').textContent = connected ? '' : 'Not found – run Setup.bat first, then retry.';
 };
+$('recheck').onclick = () => { runWasmCheck(); checkHelper(); };
 updateStatus();
+runWasmCheck(); renderChecks();
 checkHelper(); setInterval(checkHelper, 5000);
 
 /* ── Navigation ── */
@@ -263,6 +313,7 @@ let folder = '';
 function setFolder(p) {
   folder = p;
   if (useHelper()) store.set('folder', p);
+  renderChecks();
   $('folderDl').value = p; $('folderRv').value = p;
 }
 $('folderDl').oninput = (e) => { if (useHelper()) setFolder(e.target.value.trim()); };

@@ -25,12 +25,12 @@ from pydantic import BaseModel
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("HELPER_PORT", "8765"))
 
-# Only these web origins may call the helper. Tighten the regex to your exact
-# Vercel domain, e.g. r"https://my-app\.vercel\.app", or set HELPER_ORIGIN_REGEX.
+# Only these web origins may call the helper (the deployed site + localhost).
+# Override with the HELPER_ORIGIN_REGEX environment variable if the domain changes.
 ORIGIN_REGEX = re.compile(
     os.environ.get(
         "HELPER_ORIGIN_REGEX",
-        r"https://[a-z0-9-]+\.vercel\.app|http://(localhost|127\.0\.0\.1)(:\d+)?",
+        r"https://candidate-video-suite\.vercel\.app|http://(localhost|127\.0\.0\.1)(:\d+)?",
     )
 )
 
@@ -155,9 +155,30 @@ class JobRequest(BaseModel):
     items: list[JobItem]
 
 
+_ffmpeg_version = None
+
+
+def ffmpeg_version():
+    global _ffmpeg_version
+    if _ffmpeg_version is None and shutil.which("ffmpeg"):
+        try:
+            out = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True, timeout=10)
+            _ffmpeg_version = out.stdout.splitlines()[0].split(" Copyright")[0] if out.stdout else ""
+        except Exception:
+            _ffmpeg_version = ""
+    return _ffmpeg_version
+
+
 @app.get("/api/ping")
 def ping():
-    return {"ok": True, "ffmpeg": shutil.which("ffmpeg") is not None}
+    return {
+        "ok": True,
+        "version": "1.1",
+        "python": sys.version.split()[0],
+        "ffmpeg": shutil.which("ffmpeg") is not None,
+        "ffmpeg_version": ffmpeg_version() or "",
+        "ffprobe": shutil.which("ffprobe") is not None,
+    }
 
 
 @app.post("/api/browse")
