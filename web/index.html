@@ -4,12 +4,31 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Candidate Video Suite</title>
+<script>
+  (function () {
+    var t = null;
+    try { t = localStorage.getItem('theme'); } catch (e) {}
+    if (t !== 'light' && t !== 'dark') t = window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', t);
+  })();
+</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root {
     --bg:#09090b; --panel:#18181b; --line:#27272a; --line2:#3f3f46;
     --text:#fafafa; --muted:#a1a1aa; --dim:#52525b;
     --accent:#3b82f6; --ok:#22c55e; --warn:#f59e0b; --err:#ef4444;
+    --primary-hover:#e4e4e7; --banner-bg:#1c1917; --rev:#86efac; --ended-bg:rgba(9,9,11,.72);
+    --b-ok-bg:#052e16; --b-ok-fg:#86efac; --b-warn-bg:#451a03; --b-warn-fg:#fcd34d; --b-bad-bg:#450a0a; --b-bad-fg:#fca5a5;
+    color-scheme:dark;
+  }
+  :root[data-theme="light"] {
+    --bg:#f4f4f5; --panel:#ffffff; --line:#e4e4e7; --line2:#d4d4d8;
+    --text:#18181b; --muted:#52525b; --dim:#71717a;
+    --accent:#2563eb; --ok:#16a34a; --warn:#d97706; --err:#dc2626;
+    --primary-hover:#27272a; --banner-bg:#fffbeb; --rev:#15803d; --ended-bg:rgba(244,244,245,.8);
+    --b-ok-bg:#dcfce7; --b-ok-fg:#166534; --b-warn-bg:#fef3c7; --b-warn-fg:#92400e; --b-bad-bg:#fee2e2; --b-bad-fg:#991b1b;
+    color-scheme:light;
   }
   * { box-sizing:border-box; }
   body { margin:0; background:var(--bg); color:var(--text); font:14px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif; }
@@ -25,7 +44,7 @@
   button:hover:not(:disabled) { background:var(--line); color:var(--text); }
   button:disabled { opacity:.4; cursor:default; }
   button.primary { background:var(--text); color:var(--bg); border-color:var(--text); font-weight:600; }
-  button.primary:hover:not(:disabled) { background:#e4e4e7; color:var(--bg); }
+  button.primary:hover:not(:disabled) { background:var(--primary-hover); color:var(--bg); }
   button.active { background:var(--line); color:var(--text); }
   input:focus, select:focus { outline:none; border-color:var(--accent); }
   .pill { display:flex; align-items:center; gap:7px; font-size:12px; color:var(--muted); }
@@ -41,7 +60,7 @@
   .row > input { flex:1; }
   .settings { display:flex; gap:16px; flex-wrap:wrap; align-items:flex-end; }
   .settings label { margin:0 0 4px; }
-  .banner { background:#1c1917; border:1px solid var(--warn); border-radius:12px; padding:14px 16px; margin-bottom:14px; color:var(--muted); }
+  .banner { background:var(--banner-bg); border:1px solid var(--warn); border-radius:12px; padding:14px 16px; margin-bottom:14px; color:var(--muted); }
   .banner b { color:var(--text); }
   .banner a { color:var(--accent); }
   .hidden { display:none !important; }
@@ -66,22 +85,22 @@
   .videos { display:flex; gap:8px; }
   .panel { flex:1; background:var(--panel); border:1px solid var(--line); border-radius:10px; overflow:hidden; display:flex; flex-direction:column; min-width:0; }
   .vlabel { display:flex; justify-content:space-between; padding:7px 12px; font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); border-bottom:1px solid var(--line); }
-  .vlabel .rev { color:#86efac; }
+  .vlabel .rev { color:var(--rev); }
   .vwrap { position:relative; height:56vh; background:#000; }
   video { width:100%; height:100%; object-fit:contain; display:block; }
-  .ended { display:none; position:absolute; inset:0; background:rgba(9,9,11,.72); align-items:center; justify-content:center; color:var(--warn); font-size:12px; pointer-events:none; }
+  .ended { display:none; position:absolute; inset:0; background:var(--ended-bg); align-items:center; justify-content:center; color:var(--warn); font-size:12px; pointer-events:none; }
   .ended.on { display:flex; }
   .vfoot { display:flex; align-items:center; gap:8px; padding:7px 12px; border-top:1px solid var(--line); }
   .controls { margin-top:8px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 14px; display:flex; flex-direction:column; gap:8px; }
   .mono { font-family:ui-monospace,Consolas,monospace; color:var(--dim); font-size:11px; }
-  input[type=range] { flex:1; accent-color:#fafafa; }
+  input[type=range] { flex:1; accent-color:var(--text); }
   .syncdot { width:6px; height:6px; border-radius:50%; background:var(--ok); } .syncdot.warn { background:var(--warn); }
   .chk { display:flex; gap:10px; padding:7px 0; border-top:1px solid var(--line); font-size:13px; }
   .chk:first-child { border-top:0; }
   .chk .ic { width:20px; text-align:center; }
   .chk .tt { font-weight:500; } .chk .dd { color:var(--muted); font-size:12px; }
   .badge { font-size:11px; padding:2px 8px; border-radius:99px; margin-left:8px; font-weight:500; }
-  .badge.ok { background:#052e16; color:#86efac; } .badge.warn { background:#451a03; color:#fcd34d; } .badge.bad { background:#450a0a; color:#fca5a5; }
+  .badge.ok { background:var(--b-ok-bg); color:var(--b-ok-fg); } .badge.warn { background:var(--b-warn-bg); color:var(--b-warn-fg); } .badge.bad { background:var(--b-bad-bg); color:var(--b-bad-fg); }
   .empty { height:300px; display:flex; align-items:center; justify-content:center; color:var(--line2); }
 </style>
 </head>
@@ -93,6 +112,7 @@
     <button id="navRv">🎥 Video Reviewer</button>
   </nav>
   <span class="grow"></span>
+  <button id="themeBtn" title="Switch light / dark mode" aria-label="Switch light or dark mode"></button>
   <span class="pill"><span class="dot" id="dot"></span><span id="status">Checking helper…</span></span>
 </header>
 
@@ -301,6 +321,23 @@ $('recheck').onclick =() => { runWasmCheck(); checkHelper(); };
 updateStatus();
 runWasmCheck(); renderChecks();
 checkHelper(); setInterval(checkHelper, 5000);
+
+/* ── Theme (light / dark) ── */
+function currentTheme() { return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'; }
+function paintThemeBtn() { $('themeBtn').textContent = currentTheme() === 'dark' ? '☀️ Light mode' : '🌙 Dark mode'; }
+$('themeBtn').onclick = () => {
+  const next = currentTheme() === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  store.set('theme', next);
+  paintThemeBtn();
+};
+if (window.matchMedia) {
+  // follow the system setting until the user picks one explicitly
+  matchMedia('(prefers-color-scheme: light)').addEventListener?.('change', (e) => {
+    if (store.get('theme', null) === null) { document.documentElement.setAttribute('data-theme', e.matches ? 'light' : 'dark'); paintThemeBtn(); }
+  });
+}
+paintThemeBtn();
 
 /* ── Navigation ── */
 function showView(v) {
