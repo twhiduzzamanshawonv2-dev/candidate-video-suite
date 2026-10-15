@@ -109,7 +109,7 @@
       <b style="color:var(--text)">Install the helper (one time, ~2 min):</b>
       <a href="Setup.bat" download style="color:var(--accent)">Download Setup.bat</a> and double-click it
       &nbsp;or&nbsp; <button id="copyCmd" style="padding:3px 10px;font-size:12px">Copy command</button> and paste it into PowerShell.
-      Python and FFmpeg are installed automatically. Then click Re-check.
+      Python and FFmpeg are downloaded automatically (no admin, no winget). Then click Re-check.
       <span id="copyMsg" class="mono"></span>
     </div>
   </div>
@@ -118,7 +118,7 @@
     <b>These links can only be downloaded by the local helper.</b>
     The video servers block downloads from web pages, so the helper downloads straight to your PC (nothing goes through Vercel).
     <div style="margin-top:8px">
-      First time? <a href="Setup.bat" download>Download Setup.bat</a> and double-click it (installs Python and FFmpeg too).
+      First time? <a href="Setup.bat" download>Download Setup.bat</a> and double-click it (downloads Python and FFmpeg too, no admin needed).
       It starts by itself at every login after that.
       <button id="helperRetry" style="margin-left:8px">Retry connection</button>
       <span id="helperRetryMsg" class="mono" style="margin-left:8px"></span>
@@ -285,7 +285,7 @@ $('helperRetry').onclick = async () => {
   $('helperRetryMsg').textContent = connected ? '' : 'Not found – run Setup.bat first, then retry.';
 };
 $('copyCmd').onclick = async () => {
-  const cmd = `irm ${location.origin}/install.ps1 | iex`;
+  const cmd = `[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; irm ${location.origin}/install.ps1 | iex`;
   try { await navigator.clipboard.writeText(cmd); $('copyMsg').textContent = ' Copied – open PowerShell, paste, Enter.'; }
   catch { $('copyMsg').textContent = ' ' + cmd; }
 };

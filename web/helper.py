@@ -30,8 +30,15 @@ if sys.stderr is None:
     sys.stderr = open(os.devnull, "w")
 
 
+NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # no console flash when started via pythonw
+
+
 def find_exe(name):
-    """PATH first, then where winget puts FFmpeg (PATH is stale right after install)."""
+    """Bundled copy (installed by setup), then PATH, then winget's folders."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    bundled = os.path.join(here, "ffmpeg", name + ".exe")
+    if os.path.isfile(bundled):
+        return bundled
     found = shutil.which(name)
     if found:
         return found
@@ -95,7 +102,7 @@ def get_video_duration(path):
         out = subprocess.run(
             [FFPROBE or "ffprobe", "-v", "error", "-show_entries", "format=duration",
              "-of", "default=noprint_wrappers=1:nokey=1", path],
-            capture_output=True, text=True, check=True,
+            capture_output=True, text=True, check=True, creationflags=NOWIN,
         )
         return float(out.stdout.strip())
     except Exception:
@@ -110,7 +117,7 @@ def convert_to_mp4(src, preset, f):
     cmd = [FFMPEG or "ffmpeg", "-y", "-i", src, "-c:v", "libx264", "-crf", "23",
            "-preset", preset, "-c:a", "aac", "-progress", "pipe:1", dst]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                            universal_newlines=True, bufsize=1)
+                            universal_newlines=True, bufsize=1, creationflags=NOWIN)
     for line in proc.stdout:
         if "out_time_ms=" in line or "out_time_us=" in line:
             try:
@@ -186,7 +193,7 @@ def ffmpeg_version():
     global _ffmpeg_version
     if _ffmpeg_version is None and FFMPEG:
         try:
-            out = subprocess.run([FFMPEG, "-version"], capture_output=True, text=True, timeout=10)
+            out = subprocess.run([FFMPEG, "-version"], capture_output=True, text=True, timeout=10, creationflags=NOWIN)
             _ffmpeg_version = out.stdout.splitlines()[0].split(" Copyright")[0] if out.stdout else ""
         except Exception:
             _ffmpeg_version = ""
@@ -197,7 +204,7 @@ def ffmpeg_version():
 def ping():
     return {
         "ok": True,
-        "version": "1.2",
+        "version": "1.3",
         "python": sys.version.split()[0],
         "ffmpeg": FFMPEG is not None,
         "ffmpeg_version": ffmpeg_version() or "",
@@ -207,12 +214,16 @@ def ping():
 
 @app.post("/api/browse")
 def browse():
-    code = (
-        "import tkinter as tk\nfrom tkinter import filedialog\n"
-        "r=tk.Tk();r.withdraw();r.attributes('-topmost',True)\n"
-        "print(filedialog.askdirectory(master=r))"
+    script = (
+        "Add-Type -AssemblyName System.Windows.Forms;"
+        "$o=New-Object System.Windows.Forms.Form;$o.TopMost=$true;"
+        "$f=New-Object System.Windows.Forms.FolderBrowserDialog;$f.ShowNewFolderButton=$true;"
+        "if($f.ShowDialog($o) -eq 'OK'){[Console]::Out.Write($f.SelectedPath)}"
     )
-    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    out = subprocess.run(
+        ["powershell", "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-Command", script],
+        capture_output=True, text=True, creationflags=NOWIN,
+    )
     return {"path": out.stdout.strip()}
 
 
