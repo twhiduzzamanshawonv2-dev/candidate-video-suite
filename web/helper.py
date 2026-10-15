@@ -220,12 +220,12 @@ def ping():
     }
 
 
-@app.post("/api/browse")
-def browse():
-    # Windows stops background programs from taking focus, so the dialog could open behind the
-    # browser. An invisible always-on-top owner window plus an Alt key tap (which lifts the
-    # foreground lock) brings the dialog to the front and keeps it there.
-    script = r'''
+# Only one folder window may exist at a time: extra Browse clicks bring it to the front
+# instead of opening more windows.
+_browse_lock = threading.Lock()
+_browse_state = {"proc": None, "path": ""}
+
+_DIALOG_SCRIPT = r'''
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -TypeDefinition @"
 using System;
@@ -248,12 +248,69 @@ $f.ShowNewFolderButton = $true
 if ($f.ShowDialog($o) -eq 'OK') { [Console]::Out.Write($f.SelectedPath) }
 $o.Dispose()
 '''
+
+_FRONT_SCRIPT = r'''
+Add-Type -TypeDefinition @"
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public static class CvRaise {
+    delegate bool EnumProc(IntPtr h, IntPtr l);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc p, IntPtr l);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] static extern int GetWindowTextLength(IntPtr h);
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
+    [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
+    [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+    public static void Raise(uint want) {
+        keybd_event(0x12, 0, 0, UIntPtr.Zero); keybd_event(0x12, 0, 2, UIntPtr.Zero);
+        EnumWindows((h, l) => {
+            uint pid; GetWindowThreadProcessId(h, out pid);
+            if (pid == want && IsWindowVisible(h) && GetWindowTextLength(h) > 0) {
+                ShowWindow(h, 9);
+                SetWindowPos(h, new IntPtr(-1), 0, 0, 0, 0, 0x0043);
+                SetForegroundWindow(h);
+            }
+            return true;
+        }, IntPtr.Zero);
+    }
+}
+"@
+[CvRaise]::Raise(__PID__)
+'''
+
+
+def _powershell(script, **kw):
     encoded = base64.b64encode(script.encode("utf-16-le")).decode()
-    out = subprocess.run(
-        ["powershell", "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-EncodedCommand", encoded],
-        capture_output=True, text=True, creationflags=NOWIN,
-    )
-    return {"path": out.stdout.strip()}
+    return ["powershell", "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-EncodedCommand", encoded]
+
+
+@app.post("/api/browse")
+def browse():
+    if not _browse_lock.acquire(blocking=False):
+        # A folder window is already open: raise it, then share its result
+        proc = _browse_state["proc"]
+        if proc is not None and proc.poll() is None:
+            try:
+                subprocess.run(_powershell(_FRONT_SCRIPT.replace("__PID__", str(proc.pid))),
+                               capture_output=True, timeout=15, creationflags=NOWIN)
+            except Exception:
+                pass
+        with _browse_lock:
+            pass
+        return {"path": _browse_state["path"]}
+    try:
+        proc = subprocess.Popen(_powershell(_DIALOG_SCRIPT), stdout=subprocess.PIPE,
+                                text=True, creationflags=NOWIN)
+        _browse_state["proc"], _browse_state["path"] = proc, ""
+        out, _ = proc.communicate()
+        _browse_state["path"] = out.strip()
+        return {"path": _browse_state["path"]}
+    finally:
+        _browse_state["proc"] = None
+        _browse_lock.release()
 
 
 @app.post("/api/jobs")

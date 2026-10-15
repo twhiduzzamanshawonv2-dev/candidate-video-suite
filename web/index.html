@@ -387,10 +387,19 @@ $('folderDl').oninput = (e) => { if (useHelper()) setFolder(e.target.value.trim(
 $('folderRv').oninput = (e) => { if (useHelper()) setFolder(e.target.value.trim(), 'rv'); };
 $('folderRv').onchange = () => { if (useHelper()) loadCandidates(); };
 $('folderRv').onkeydown = (e) => { if (e.key === 'Enter' && useHelper()) loadCandidates(); };
+let browsePending = 0;
+const BROWSE_LABELS = { browseDl: '📁 Browse', browseRv: 'Browse' };
+function paintBrowse() {
+  for (const id of Object.keys(BROWSE_LABELS))
+    $(id).textContent = browsePending ? '⏳ Folder window open…' : BROWSE_LABELS[id];
+}
 async function browse(after) {
   try {
     if (useHelper()) {
-      const r = await post('/api/browse');
+      // Extra clicks while the window is open just bring it to the front (the helper never opens a second one)
+      browsePending++; paintBrowse();
+      let r;
+      try { r = await post('/api/browse'); } finally { browsePending--; paintBrowse(); }
       if (r.path) { setFolder(r.path); if (after) after(); }
     } else {
       if (!hasFS) return alert('Please use Chrome or Edge on desktop.');
