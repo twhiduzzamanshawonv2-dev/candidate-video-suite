@@ -241,11 +241,13 @@ const hasFS = 'showDirectoryPicker' in window;
 let connected = false;           // optional local helper detected
 let dirHandle = null;            // folder picked in browser mode
 const useHelper = () => connected;
+let firstCheckDone = false;      // false until the first helper check has answered
 function updateStatus(info) {
   const ok = connected || hasFS;
   $('dot').classList.toggle('on', ok);
   $('status').textContent = connected
     ? 'Local helper connected' + (info && !info.ffmpeg ? ' · FFmpeg missing' : '')
+    : !firstCheckDone ? 'Checking helper…'
     : hasFS ? 'Browser mode' : 'Unsupported browser';
   $('setup').classList.toggle('hidden', ok);
   $('folderDl').readOnly = $('folderRv').readOnly = !connected;
@@ -295,16 +297,16 @@ function setConnected(ok, info) {
   if (ok !== was) { setFolder(ok ? store.get('folder', '') : (dirHandle ? dirHandle.name : '')); cur = null; loadCandidates(); }
 }
 let pingFails = 0;
-async function checkHelper(force) {
+async function checkHelper(force, ms) {
   try {
-    const signal = AbortSignal.timeout ? AbortSignal.timeout(3000) : undefined;
+    const signal = AbortSignal.timeout ? AbortSignal.timeout(ms || 8000) : undefined;
     const info = await api('/api/ping', { signal });
-    pingFails = 0; setConnected(true, info);
+    pingFails = 0; firstCheckDone = true; setConnected(true, info);
   } catch {
-    // background polling tolerates one missed check (busy PC) so it can't wipe the typed path;
-    // a manual Re-check is authoritative
+    // background polling tolerates missed checks (busy PC, Chrome's local-network permission prompt)
+    // so it can't flip modes; a manual Re-check or a Browse click is authoritative
     pingFails++;
-    if (force || pingFails >= 2 || !connected) setConnected(false);
+    if (force || pingFails >= 3 || !connected) { firstCheckDone = true; setConnected(false); }
   }
 }
 function showHelperBanner() { if (!connected) $('helperBanner').classList.remove('hidden'); }
@@ -390,26 +392,45 @@ $('folderDl').oninput = (e) => { if (useHelper()) setFolder(e.target.value.trim(
 $('folderRv').oninput = (e) => { if (useHelper()) setFolder(e.target.value.trim(), 'rv'); };
 $('folderRv').onchange = () => { if (useHelper()) loadCandidates(); };
 $('folderRv').onkeydown = (e) => { if (e.key === 'Enter' && useHelper()) loadCandidates(); };
-let browsePending = 0;
+let browsePending = 0, browseStarting = false;
 const BROWSE_LABELS = { browseDl: '📁 Browse', browseRv: 'Browse' };
 function paintBrowse() {
   for (const id of Object.keys(BROWSE_LABELS))
-    $(id).textContent = browsePending ? '⏳ Folder window open…' : BROWSE_LABELS[id];
+    $(id).textContent = browsePending ? '⏳ Folder window open…' : browseStarting ? '⏳ Connecting to helper…' : BROWSE_LABELS[id];
 }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function browse(after) {
+  if (browseStarting) return;
   try {
-    if (useHelper()) {
-      // Extra clicks while the window is open just bring it to the front (the helper never opens a second one)
+    if (!browsePending && !useHelper()) {
+      // Don't trust a stale "not connected": re-check now and try to start the helper first
+      browseStarting = true; paintBrowse();
+      await checkHelper(true, 4000);
+      if (!connected) {
+        launchHelper();
+        // keep trying for ~10s: the helper may be starting, or Chrome may be waiting for the
+        // user to answer its "access devices on your local network" prompt
+        for (let i = 0; i < 10 && !connected; i++) { await sleep(1000); await checkHelper(true, 2500); }
+      }
+      browseStarting = false; paintBrowse();
+    }
+    if (useHelper() || browsePending) {
+      // While the Windows folder window is open, extra clicks just bring it to the front
+      // (the helper never opens a second one) - and never fall back to Chrome's picker.
       browsePending++; paintBrowse();
       let r;
       try { r = await post('/api/browse'); } finally { browsePending--; paintBrowse(); }
       if (r.path) { setFolder(r.path); if (after) after(); }
     } else {
       if (!hasFS) return alert('Please use Chrome or Edge on desktop.');
+      const msg = ["The local helper isn't running, so the Windows folder window can't be used.", '',
+        "Use the browser's own folder picker instead? (Downloads from most video links will be blocked in this mode.)"].join(String.fromCharCode(10));
+      if (!confirm(msg)) return;
       dirHandle = await showDirectoryPicker({ mode: 'readwrite' });
       setFolder(dirHandle.name); if (after) after();
     }
   } catch (e) { if (e.name !== 'AbortError') alert('Could not open folder: ' + e.message); }
+  finally { browseStarting = false; paintBrowse(); }
 }
 $('browseDl').onclick = () => browse();
 $('browseRv').onclick = () => browse(loadCandidates);
