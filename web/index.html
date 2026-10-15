@@ -176,6 +176,7 @@
   .sc-setup-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .sc-or { font-size:12px; color:var(--muted); }
   .sc-setup-note { margin-top:10px; font-size:12px; color:var(--muted); }
+  .sc-setup-note.sc-perm b { color:var(--text); }
   a.btnlink { display:inline-flex; align-items:center; gap:7px; border-radius:8px; padding:7px 14px; font-size:13px; font-weight:600; text-decoration:none; border:1px solid var(--line); color:var(--text); }
   a.btnlink.primary { background:var(--text); color:var(--bg); border-color:var(--text); }
   a.btnlink.primary:hover { background:var(--primary-hover); }
@@ -236,6 +237,8 @@
         <span id="copyMsg" class="mono"></span>
       </div>
       <div class="sc-setup-note">Python and FFmpeg are downloaded for you (no admin rights, no winget). When it says Done, click Re-check.</div>
+      <div class="sc-setup-note sc-perm"><b>Chrome may ask for permission</b> to connect to apps on this computer. Click <b>Allow</b> (it only lets this page talk to the helper on your own PC).
+        If you clicked Block by mistake: click the settings icon left of the address, choose <b>Site settings</b>, set <b>Local network access</b> to Allow, then press Re-check.</div>
     </div>
   </div>
 
@@ -525,7 +528,7 @@ $('recheck').onclick = async () => {
       await new Promise((r) => setTimeout(r, 3500));
       await checkHelper(true);
     }
-    msg.textContent = connected ? '✓ Helper connected' : 'Helper still not found – run Setup, then Re-check';
+    msg.textContent = connected ? '✓ Helper connected' : 'Not found – run Setup, and click Allow if Chrome asks, then Re-check';
   } finally {
     btn.disabled = false; btn.classList.remove('busy'); btn.querySelector('.lbl').textContent = 'Re-check'; rechecking = false;
     setTimeout(() => { if ($('recheckMsg').textContent.startsWith('✓')) $('recheckMsg').textContent = ''; }, 4000);
@@ -599,7 +602,7 @@ function guideToInstall(msg) {
   card.classList.remove('nudge'); void card.offsetWidth; card.classList.add('nudge');
   toast(msg);
 }
-const INSTALL_FIRST = 'First step: install the helper (one time, about 2 minutes). Click “Download Setup.bat” above and open it, then press Re-check. Already installed? Just press Re-check.';
+const INSTALL_FIRST = 'First step: install the helper (one time, about 2 minutes). Click “Download Setup.bat” above and open it, then press Re-check. Already installed? Click Allow if Chrome asks for permission, then press Re-check.';
 let raising = false;
 function raiseFolderWindow() {
   // One quick request at a time: piling up long-waiting requests fills Chrome's 6-connection limit,
