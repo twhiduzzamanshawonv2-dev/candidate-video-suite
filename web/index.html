@@ -392,7 +392,7 @@ $('folderDl').oninput = (e) => { if (useHelper()) setFolder(e.target.value.trim(
 $('folderRv').oninput = (e) => { if (useHelper()) setFolder(e.target.value.trim(), 'rv'); };
 $('folderRv').onchange = () => { if (useHelper()) loadCandidates(); };
 $('folderRv').onkeydown = (e) => { if (e.key === 'Enter' && useHelper()) loadCandidates(); };
-let browsePending = 0, browseStarting = false;
+let browsePending = 0, browseStarting = false, outdatedWarned = false;
 const BROWSE_LABELS = { browseDl: '📁 Browse', browseRv: 'Browse' };
 function paintBrowse() {
   for (const id of Object.keys(BROWSE_LABELS))
@@ -413,6 +413,11 @@ async function browse(after) {
         for (let i = 0; i < 10 && !connected; i++) { await sleep(1000); await checkHelper(true, 2500); }
       }
       browseStarting = false; paintBrowse();
+    }
+    if (connected && !outdatedWarned && parseFloat(helperInfo?.version) < MIN_HELPER) {
+      outdatedWarned = true;
+      alert('Your local helper is outdated (v' + (helperInfo?.version || '?') + ', need v' + MIN_HELPER + ').' + String.fromCharCode(10, 10) +
+        'Old helpers open a new folder window on every click. Run the setup command again (see System check at the top), then click Re-check.');
     }
     if (useHelper() || browsePending) {
       // While the Windows folder window is open, extra clicks just bring it to the front

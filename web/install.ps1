@@ -46,6 +46,14 @@ New-Item -ItemType Directory -Force $tmp | Out-Null
 Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
     Where-Object { $_.CommandLine -like '*CandidateHelper*helper.py*' } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+# ...and whatever else is holding the helper port (an old helper started another way, e.g. start_helper.bat,
+# would otherwise keep running and make the new one exit silently)
+try {
+    Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue | ForEach-Object {
+        $pr = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue
+        if ($pr -and $pr.ProcessName -match '^pythonw?$') { Step "Stopping old helper (pid $($pr.Id))..."; Stop-Process -Id $pr.Id -Force -ErrorAction SilentlyContinue }
+    }
+} catch {}
 Start-Sleep -Milliseconds 800
 
 # 1. Helper script (use a local copy if run from the project folder)
