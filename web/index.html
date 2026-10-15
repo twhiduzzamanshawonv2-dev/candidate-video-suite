@@ -238,7 +238,7 @@ function updateStatus(info) {
   $('setup').classList.toggle('hidden', ok);
   $('folderDl').readOnly = $('folderRv').readOnly = !connected;
 }
-let helperInfo = null, wasmOk = null;
+let folder = '', helperInfo = null, wasmOk = null;
 function renderChecks() {
   const ua = navigator.userAgent;
   const chromium = /Chrome\/|Edg\//.test(ua) && !/Mobile/.test(ua);
@@ -309,7 +309,6 @@ $('navDl').onclick = () => showView('dl');
 $('navRv').onclick = () => showView('rv');
 
 /* ── Shared folder ── */
-let folder = '';
 function setFolder(p) {
   folder = p;
   if (useHelper()) store.set('folder', p);
