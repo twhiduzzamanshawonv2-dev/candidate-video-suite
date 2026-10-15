@@ -42,6 +42,14 @@ New-Item -ItemType Directory -Force $dir | Out-Null
 $tmp = Join-Path $env:TEMP ('cvh_' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force $tmp | Out-Null
 
+# 1. Get the helper script FIRST (from the project folder if run from there, else from the site),
+#    so a failed download never leaves you without a working helper
+$helper = Join-Path $dir 'helper.py'
+$newHelper = Join-Path $tmp 'helper.py'
+$localHelper = if ($PSScriptRoot) { Join-Path $PSScriptRoot 'helper.py' } else { $null }
+if ($localHelper -and (Test-Path $localHelper)) { Step 'Using local helper.py'; Copy-Item $localHelper $newHelper -Force }
+else { Step 'Downloading helper...'; Download "$Base/helper.py" $newHelper }
+
 # Stop a running copy so files can be replaced
 Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
     Where-Object { $_.CommandLine -like '*CandidateHelper*helper.py*' } |
@@ -55,12 +63,8 @@ try {
     }
 } catch {}
 Start-Sleep -Milliseconds 800
+Copy-Item $newHelper $helper -Force
 
-# 1. Helper script (use a local copy if run from the project folder)
-$helper = Join-Path $dir 'helper.py'
-$localHelper = if ($PSScriptRoot) { Join-Path $PSScriptRoot 'helper.py' } else { $null }
-if ($localHelper -and (Test-Path $localHelper)) { Step 'Using local helper.py'; Copy-Item $localHelper $helper -Force }
-else { Step 'Downloading helper...'; Download "$Base/helper.py" $helper }
 
 # 2. Private Python (embeddable build: no installer, no admin, no PATH changes)
 $pyDir = Join-Path $dir 'python'
@@ -145,6 +149,18 @@ Write-Host ''
 if ($up) {
     Write-Host "[+] Done. Helper is running (Python $($r.python), FFmpeg: $($r.ffmpeg))." -ForegroundColor Green
     Write-Host '[+] It starts automatically at every login. Go back to the web page and click Re-check.'
+    Write-Host ''
+    $keepOpen = $false
+    for ($n = 8; $n -ge 1 -and -not $keepOpen; $n--) {
+        Write-Host ("`r    This window closes in $n s  (press any key to keep it open)   ") -NoNewline
+        for ($t = 0; $t -lt 10 -and -not $keepOpen; $t++) {
+            Start-Sleep -Milliseconds 100
+            try { if ($Host.UI.RawUI.KeyAvailable) { [void]$Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown'); $keepOpen = $true } } catch {}
+        }
+    }
+    Write-Host ''
+    if ($keepOpen) { Write-Host '    Kept open. You can close this window now.' }
+    else { exit 0 }
 } else {
     Write-Host '[X] Installed, but the helper did not respond on port 8765.' -ForegroundColor Red
     Write-Host '    Try signing out and in again, or check that antivirus/firewall is not blocking python.exe.'
@@ -158,4 +174,6 @@ if ($up) {
         if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force; Write-Host '    (it started fine here - something blocks the hidden start; send this to the developer)' }
         if (Test-Path $out) { Get-Content $out -Tail 25 | ForEach-Object { Write-Host "    $_" } }
     }
+    # started from Setup.bat: tell it to wait so this message can be read (a pasted command stays open on its own)
+    if ($env:CVH_FROM_BAT) { exit 1 }
 }
