@@ -273,10 +273,6 @@
           <div class="bulk-title">Bulk upload</div>
           <div class="bulk-sub">Add a CSV or Excel file with your candidates, then choose who to download.</div>
         </div>
-        <button id="sampleBtn" class="ghost" type="button" title="Download an example file you can fill in">
-          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M5 21h14"/></svg>
-          Sample CSV
-        </button>
       </div>
 
       <input type="file" id="file" accept=".csv,.xlsx,.xls" hidden>
@@ -953,7 +949,7 @@ async function handleBulkFile(f) {
     else { const wb = XLSX.read(await f.arrayBuffer()); data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' }); }
     const cols = data.length ? Object.keys(data[0]) : [];
     if (!cols.length || !data.length) {
-      showBulkError(`<b>${esc(f.name)} looks empty.</b> It needs a first row with column names, then one row per candidate. Use “Sample CSV” above for an example.`);
+      showBulkError(`<b>${esc(f.name)} looks empty.</b> It needs a first row with column names, then one row per candidate: <span class="kbd">candidate_id</span> <span class="kbd">screen_record_url</span> <span class="kbd">webcam_record_url</span>.`);
       return;
     }
     bulkSource = { file: f, data, cols };
@@ -996,13 +992,6 @@ $('removeFile').onclick = resetBulk;
     window.addEventListener(ev, (e) => { if (hasFiles(e) && !e.target.closest?.('#bulk')) e.preventDefault(); });
 }
 
-// sample file
-$('sampleBtn').onclick = () => {
-  const csv = 'candidate_id,screen_record_url,webcam_record_url\r\n1217,https://example.com/1217_screen.webm,https://example.com/1217_webcam.webm\r\n1218,https://example.com/1218_screen.webm,https://example.com/1218_webcam.webm\r\n';
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'sample_candidates.csv';
-  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-};
 
 function updateBulkCount() {
   const n = bulkRows.filter((r) => r.on).length;
