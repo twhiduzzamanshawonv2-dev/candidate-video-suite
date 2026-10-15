@@ -5,4 +5,5 @@ Works in Chrome/Edge on desktop; nothing to install.
 
 - `web/` - the site (static; deployed on Vercel via `vercel.json`)
 - `run_local.bat` - serve the site locally at http://localhost:8000
-- `helper.py`, `start_helper.bat` - optional local helper (native FFmpeg, bypasses CORS). Set `HELPER_ORIGIN_REGEX` to your Vercel domain.
+- `helper.py`, `helper_setup/`, `start_helper.bat` - local helper: downloads straight to the PC when source servers block browsers (CORS). Users run `web/CandidateHelperSetup.zip` once (rebuild it from `helper_setup/` after editing `helper.py`). Set `HELPER_ORIGIN_REGEX` to your Vercel domain.
+

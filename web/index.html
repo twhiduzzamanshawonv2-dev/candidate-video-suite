@@ -96,6 +96,17 @@
     Open this page in <b>Chrome or Edge</b> (desktop). Nothing needs to be installed.
   </div>
 
+  <div id="helperBanner" class="banner hidden">
+    <b>These links can only be downloaded by the local helper.</b>
+    The video servers block downloads from web pages, so the helper downloads straight to your PC (nothing goes through Vercel).
+    <div style="margin-top:8px">
+      First time? <a href="CandidateHelperSetup.zip" download>Download the one-time setup</a>, unzip it and double-click <b>Setup.bat</b>.
+      It starts by itself at every login after that.
+      <button id="helperRetry" style="margin-left:8px">Retry connection</button>
+      <span id="helperRetryMsg" class="mono" style="margin-left:8px"></span>
+    </div>
+  </div>
+
   <!-- DOWNLOAD VIEW -->
   <section id="dlView" class="narrow">
     <div class="card">
@@ -215,11 +226,24 @@ function updateStatus(info) {
 function setConnected(ok, info) {
   const was = connected; connected = ok;
   updateStatus(info);
+  if (ok) $('helperBanner').classList.add('hidden');
   if (ok !== was) { setFolder(ok ? store.get('folder', '') : (dirHandle ? dirHandle.name : '')); cur = null; loadCandidates(); }
 }
 async function checkHelper() {
   try { setConnected(true, await api('/api/ping')); } catch { setConnected(false); }
 }
+function showHelperBanner() { if (!connected) $('helperBanner').classList.remove('hidden'); }
+function launchHelper() {
+  // Works after the one-time setup registered the cvhelper:// link
+  const f = document.createElement('iframe'); f.style.display = 'none'; f.src = 'cvhelper://start';
+  document.body.appendChild(f); setTimeout(() => f.remove(), 3000);
+}
+$('helperRetry').onclick = async () => {
+  $('helperRetryMsg').textContent = 'Checking…';
+  await checkHelper();
+  if (!connected) { launchHelper(); await new Promise((r) => setTimeout(r, 3000)); await checkHelper(); }
+  $('helperRetryMsg').textContent = connected ? '' : 'Not found – run Setup.bat first, then retry.';
+};
 updateStatus();
 checkHelper(); setInterval(checkHelper, 5000);
 
@@ -370,20 +394,8 @@ async function processInBrowser(f, mode, preset) {
     try { await cdir.getFileHandle(f.name + ext); f.status = 'exists'; f.progress = 100; f.message = 'Already downloaded'; return; } catch {}
     tmpName = mode === 'rename' ? f.name + '.mp4' : f.name + '.webm';
     f.status = 'downloading';
-    let resp;
-    try { resp = await fetch(f.url); }
-    catch (e) {
-      if (!(e instanceof TypeError)) throw e;
-      // Source blocks browser downloads (CORS): retry through the site's own proxy
-      resp = await fetch('/api/proxy?url=' + encodeURIComponent(f.url));
-      if (resp.status === 404 && !(resp.headers.get('content-type') || '').startsWith('video')) {
-        const t = await resp.text();
-        if (t.startsWith('<') || !t) throw new TypeError('no proxy');
-        throw new Error(t);
-      }
-      f.message = 'via server proxy';
-    }
-    if (!resp.ok) throw new Error(resp.status === 502 || resp.status === 400 || resp.status === 403 ? await resp.text() : 'HTTP ' + resp.status);
+    const resp = await fetch(f.url);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
     const total = +resp.headers.get('content-length') || 0;
     w = await (await cdir.getFileHandle(tmpName, { create: true })).createWritable();
     const reader = resp.body.getReader(); let got = 0;
@@ -398,9 +410,8 @@ async function processInBrowser(f, mode, preset) {
   } catch (e) {
     if (w) { try { await w.abort(); } catch {} }
     f.status = 'failed';
-    f.message = e instanceof TypeError
-      ? "Blocked by the source server (CORS) – use the optional local helper for these links"
-      : e.message;
+    if (e instanceof TypeError) { f.message = 'Blocked by the source server (CORS) – needs the local helper'; showHelperBanner(); }
+    else f.message = e.message;
   }
 }
 async function runBrowserJob(items) {
