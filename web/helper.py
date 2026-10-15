@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 import uuid
+import glob
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
@@ -21,6 +22,29 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
+
+# Started with pythonw (no console) at login: stdout/stderr are None and crash uvicorn
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w")
+
+
+def find_exe(name):
+    """PATH first, then where winget puts FFmpeg (PATH is stale right after install)."""
+    found = shutil.which(name)
+    if found:
+        return found
+    local = os.environ.get("LOCALAPPDATA", "")
+    link = os.path.join(local, "Microsoft", "WinGet", "Links", name + ".exe")
+    if os.path.isfile(link):
+        return link
+    hits = glob.glob(os.path.join(local, "Microsoft", "WinGet", "Packages", "*FFmpeg*", "**", "bin", name + ".exe"), recursive=True)
+    return hits[0] if hits else None
+
+
+FFMPEG = find_exe("ffmpeg")
+FFPROBE = find_exe("ffprobe")
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("HELPER_PORT", "8765"))
@@ -69,7 +93,7 @@ JOBS = {}
 def get_video_duration(path):
     try:
         out = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+            [FFPROBE or "ffprobe", "-v", "error", "-show_entries", "format=duration",
              "-of", "default=noprint_wrappers=1:nokey=1", path],
             capture_output=True, text=True, check=True,
         )
@@ -83,7 +107,7 @@ def convert_to_mp4(src, preset, f):
     duration = get_video_duration(src)
     f["status"] = "converting"
     f["progress"] = 0
-    cmd = ["ffmpeg", "-y", "-i", src, "-c:v", "libx264", "-crf", "23",
+    cmd = [FFMPEG or "ffmpeg", "-y", "-i", src, "-c:v", "libx264", "-crf", "23",
            "-preset", preset, "-c:a", "aac", "-progress", "pipe:1", dst]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                             universal_newlines=True, bufsize=1)
@@ -160,9 +184,9 @@ _ffmpeg_version = None
 
 def ffmpeg_version():
     global _ffmpeg_version
-    if _ffmpeg_version is None and shutil.which("ffmpeg"):
+    if _ffmpeg_version is None and FFMPEG:
         try:
-            out = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True, timeout=10)
+            out = subprocess.run([FFMPEG, "-version"], capture_output=True, text=True, timeout=10)
             _ffmpeg_version = out.stdout.splitlines()[0].split(" Copyright")[0] if out.stdout else ""
         except Exception:
             _ffmpeg_version = ""
@@ -173,11 +197,11 @@ def ffmpeg_version():
 def ping():
     return {
         "ok": True,
-        "version": "1.1",
+        "version": "1.2",
         "python": sys.version.split()[0],
-        "ffmpeg": shutil.which("ffmpeg") is not None,
+        "ffmpeg": FFMPEG is not None,
         "ffmpeg_version": ffmpeg_version() or "",
-        "ffprobe": shutil.which("ffprobe") is not None,
+        "ffprobe": FFPROBE is not None,
     }
 
 
@@ -196,7 +220,7 @@ def browse():
 def create_job(req: JobRequest):
     if not req.folder or not os.path.isdir(req.folder):
         raise HTTPException(400, "Destination folder does not exist")
-    if req.mode == "convert" and not shutil.which("ffmpeg"):
+    if req.mode == "convert" and not FFMPEG:
         raise HTTPException(400, "FFmpeg is not installed (needed for Convert mode)")
 
     files = []
@@ -301,4 +325,4 @@ if __name__ == "__main__":
         if probe.connect_ex((HOST, PORT)) == 0:
             sys.exit(0)  # already running (e.g. auto-started at login)
     print(f"Helper running on http://{HOST}:{PORT}  (keep this window open)")
-    uvicorn.run(app, host=HOST, port=PORT, log_level="warning")
+    uvicorn.run(app, host=HOST, port=PORT, log_level="warning", log_config=None)
