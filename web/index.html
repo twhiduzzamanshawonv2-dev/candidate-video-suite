@@ -150,19 +150,8 @@
         <input type="number" id="workers" min="1" max="10" value="4" style="width:80px"></div>
     </div>
 
-    <div class="tabs">
-      <button id="tabSingle" class="active">👤 Single Candidate</button>
-      <button id="tabBulk">📂 Bulk Upload (CSV/Excel)</button>
-    </div>
-
-    <div id="single" class="card">
-      <label>Candidate ID</label><input type="text" id="cid" placeholder="e.g. 1217">
-      <label>Screen Record URL</label><input type="text" id="surl" placeholder="https://...">
-      <label>Webcam Record URL</label><input type="text" id="wurl" placeholder="https://...">
-      <div style="margin-top:14px"><button class="primary" id="startSingle">🚀 Start Single Process</button></div>
-    </div>
-
-    <div id="bulk" class="card hidden">
+    <div id="bulk" class="card">
+      <h3>📂 Bulk Upload (CSV/Excel)</h3>
       <input type="file" id="file" accept=".csv,.xlsx,.xls">
       <div id="bulkInfo" class="msg"></div>
       <div id="bulkTools" class="hidden">
@@ -343,14 +332,6 @@ $('reload').onclick = loadCandidates;
 
 /* ── Settings ── */
 $('mode').onchange = () => $('presetBox').classList.toggle('hidden', $('mode').value !== 'convert');
-$('tabSingle').onclick = () => tab('single');
-$('tabBulk').onclick = () => tab('bulk');
-function tab(t) {
-  $('single').classList.toggle('hidden', t !== 'single');
-  $('bulk').classList.toggle('hidden', t !== 'bulk');
-  $('tabSingle').classList.toggle('active', t === 'single');
-  $('tabBulk').classList.toggle('active', t === 'bulk');
-}
 
 /* ── Jobs ── */
 const history = [];
@@ -496,11 +477,6 @@ async function runBrowserJob(items) {
   const s = { finished: true, files }; renderJob(s); finishJob(s, items);
 }
 
-$('startSingle').onclick = () => {
-  const id = $('cid').value.trim();
-  if (!id) return alert('Missing Candidate ID');
-  runJob([{ id, screen_url: $('surl').value.trim() || null, webcam_url: $('wurl').value.trim() || null }]);
-};
 
 /* ── Bulk upload ── */
 let bulkRows = [];
