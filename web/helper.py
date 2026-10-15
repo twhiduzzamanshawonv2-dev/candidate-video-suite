@@ -17,17 +17,24 @@ import uuid
 import glob
 from concurrent.futures import ThreadPoolExecutor
 
+# Started with pythonw (no console): stdout/stderr are None, which crashes uvicorn and hides
+# every error. Send them to helper.log next to this file so problems can be diagnosed.
+if sys.stdout is None or sys.stderr is None:
+    try:
+        _log = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "helper.log"),
+                    "w", buffering=1, encoding="utf-8")
+    except OSError:
+        _log = open(os.devnull, "w")
+    if sys.stdout is None:
+        sys.stdout = _log
+    if sys.stderr is None:
+        sys.stderr = _log
+
 import requests
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
-
-# Started with pythonw (no console) at login: stdout/stderr are None and crash uvicorn
-if sys.stdout is None:
-    sys.stdout = open(os.devnull, "w")
-if sys.stderr is None:
-    sys.stderr = open(os.devnull, "w")
 
 
 NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # no console flash when started via pythonw

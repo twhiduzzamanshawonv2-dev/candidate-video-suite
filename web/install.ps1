@@ -104,12 +104,11 @@ if ((Test-Path (Join-Path $ffDir 'ffmpeg.exe')) -or (Get-Command ffmpeg -ErrorAc
     if (-not $ok) { Write-Host '[!] FFmpeg could not be installed. Downloads still work; Convert (.mp4) needs FFmpeg.' -ForegroundColor Yellow }
 }
 
-# 4. Hidden launcher, start at login, and the cvhelper:// link
+# 4. Start at login and the cvhelper:// link. pythonw.exe has no window, so it is launched
+#    directly (no Windows Script Host, which some PCs have disabled).
 $pyw = Join-Path $pyDir 'pythonw.exe'
-$vbs = Join-Path $dir 'launcher.vbs'
-$line = 'CreateObject("WScript.Shell").Run """' + $pyw + '"" ""' + $helper + '""", 0, False'
-Set-Content -Path $vbs -Value $line -Encoding ASCII
-$cmd = 'wscript.exe "' + $vbs + '"'
+$cmd = '"' + $pyw + '" "' + $helper + '"'
+Remove-Item (Join-Path $dir 'launcher.vbs') -Force -ErrorAction SilentlyContinue
 
 Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'CandidateHelper' -Value $cmd
 $proto = 'HKCU:\Software\Classes\cvhelper'
@@ -120,9 +119,10 @@ Set-ItemProperty -Path "$proto\shell\open\command" -Name '(default)' -Value $cmd
 
 # 5. Start now and verify
 Step 'Starting helper...'
-Start-Process wscript.exe -ArgumentList ('"' + $vbs + '"')
+Start-Process -FilePath $pyw -ArgumentList ('"' + $helper + '"') -WorkingDirectory $dir -WindowStyle Hidden
 $up = $false
-for ($i = 0; $i -lt 20 -and -not $up; $i++) {
+# first start can be slow (Python compiles the libraries, antivirus scans them)
+for ($i = 0; $i -lt 60 -and -not $up; $i++) {
     Start-Sleep -Milliseconds 750
     try { $r = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/ping' -TimeoutSec 2; if ($r.ok) { $up = $true } } catch {}
 }
@@ -135,4 +135,14 @@ if ($up) {
 } else {
     Write-Host '[X] Installed, but the helper did not respond on port 8765.' -ForegroundColor Red
     Write-Host '    Try signing out and in again, or check that antivirus/firewall is not blocking python.exe.'
+    $log = Join-Path $dir 'helper.log'
+    if (Test-Path $log) { Write-Host '    --- helper.log ---'; Get-Content $log -Tail 25 | ForEach-Object { Write-Host "    $_" } }
+    else {
+        Write-Host '    --- trying to run the helper in this window to show the error ---'
+        $out = Join-Path $env:TEMP 'cvh_run.txt'
+        $p = Start-Process -FilePath $py -ArgumentList ('"' + $helper + '"') -RedirectStandardError $out -NoNewWindow -PassThru
+        Start-Sleep -Seconds 8
+        if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force; Write-Host '    (it started fine here - something blocks the hidden start; send this to the developer)' }
+        if (Test-Path $out) { Get-Content $out -Tail 25 | ForEach-Object { Write-Host "    $_" } }
+    }
 }
