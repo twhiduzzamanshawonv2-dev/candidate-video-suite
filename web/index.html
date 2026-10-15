@@ -423,7 +423,8 @@ function renderChecks() {
   else if (bad) { mode = 'bad'; title = 'Action needed'; sub = `${bad.t}: ${bad.d}`; }
   else if (warn) {
     mode = 'warn';
-    title = !connected ? 'One more step: install the helper' : 'Helper update available';
+    if (warn.t === 'Local helper') title = !connected ? 'One more step: install the helper' : 'Helper update available';
+    else title = 'Almost there';
     sub = warn.d;
   }
   else if (!folder) { mode = 'info'; title = 'Almost ready'; sub = 'Choose a download folder below to get started.'; }
