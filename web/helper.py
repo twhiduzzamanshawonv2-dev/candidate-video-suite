@@ -5,6 +5,7 @@ Runs on the user's PC (http://127.0.0.1:8765). The web page (hosted on Vercel)
 talks to it for everything that needs the local machine: folder picker,
 downloads, FFmpeg conversion and streaming videos to the reviewer.
 """
+import base64
 import mimetypes
 import os
 import re
@@ -221,14 +222,35 @@ def ping():
 
 @app.post("/api/browse")
 def browse():
-    script = (
-        "Add-Type -AssemblyName System.Windows.Forms;"
-        "$o=New-Object System.Windows.Forms.Form;$o.TopMost=$true;"
-        "$f=New-Object System.Windows.Forms.FolderBrowserDialog;$f.ShowNewFolderButton=$true;"
-        "if($f.ShowDialog($o) -eq 'OK'){[Console]::Out.Write($f.SelectedPath)}"
-    )
+    # Windows stops background programs from taking focus, so the dialog could open behind the
+    # browser. An invisible always-on-top owner window plus an Alt key tap (which lifts the
+    # foreground lock) brings the dialog to the front and keeps it there.
+    script = r'''
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class CvFront {
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+}
+"@
+$o = New-Object System.Windows.Forms.Form
+$o.TopMost = $true; $o.ShowInTaskbar = $false; $o.Opacity = 0
+$o.StartPosition = 'CenterScreen'; $o.Size = New-Object System.Drawing.Size(1, 1)
+$o.Show()
+[CvFront]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)
+[CvFront]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
+[void][CvFront]::SetForegroundWindow($o.Handle)
+$o.Activate()
+$f = New-Object System.Windows.Forms.FolderBrowserDialog
+$f.ShowNewFolderButton = $true
+if ($f.ShowDialog($o) -eq 'OK') { [Console]::Out.Write($f.SelectedPath) }
+$o.Dispose()
+'''
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode()
     out = subprocess.run(
-        ["powershell", "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-Command", script],
+        ["powershell", "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-EncodedCommand", encoded],
         capture_output=True, text=True, creationflags=NOWIN,
     )
     return {"path": out.stdout.strip()}
