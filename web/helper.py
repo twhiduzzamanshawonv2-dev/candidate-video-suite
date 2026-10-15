@@ -212,7 +212,7 @@ def ffmpeg_version():
 def ping():
     return {
         "ok": True,
-        "version": "1.5",
+        "version": "1.6",
         "python": sys.version.split()[0],
         "ffmpeg": FFMPEG is not None,
         "ffmpeg_version": ffmpeg_version() or "",
@@ -227,27 +227,139 @@ _browse_state = {"proc": None, "path": ""}
 
 _DIALOG_SCRIPT = r'''
 Add-Type -AssemblyName System.Windows.Forms
-Add-Type -TypeDefinition @"
+$title = __TITLE__
+$start = __START__
+$picked = ''
+try {
+    # Modern Explorer-style folder picker (address bar, search, Quick access, large folder icons).
+    # No WinForms owner window: an unpumped owner can stop the picker from ever appearing.
+    $cvSrc = @"
 using System;
+using System.Text;
+using System.Threading;
 using System.Runtime.InteropServices;
-public static class CvFront {
-    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
-    [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+[ComImport, Guid("DC1C5A9C-E88A-4dde-A5A1-60F82A20AEF7")] class CvFileOpenDialog {}
+[ComImport, Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface ICvShellItem {
+    void BindToHandler(IntPtr pbc, ref Guid bhid, ref Guid riid, out IntPtr ppv);
+    void GetParent(out ICvShellItem ppsi);
+    void GetDisplayName(uint sigdnName, [MarshalAs(UnmanagedType.LPWStr)] out string ppszName);
+    void GetAttributes(uint sfgaoMask, out uint psfgaoAttribs);
+    void Compare(ICvShellItem psi, uint hint, out int piOrder);
+}
+[ComImport, Guid("42F85136-DB7E-439C-85F1-E4075D135FC8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface ICvFileOpenDialog {
+    [PreserveSig] int Show(IntPtr parent);
+    void SetFileTypes(uint cFileTypes, IntPtr rgFilterSpec);
+    void SetFileTypeIndex(uint iFileType);
+    void GetFileTypeIndex(out uint piFileType);
+    void Advise(IntPtr pfde, out uint pdwCookie);
+    void Unadvise(uint dwCookie);
+    void SetOptions(uint fos);
+    void GetOptions(out uint pfos);
+    void SetDefaultFolder(ICvShellItem psi);
+    void SetFolder(ICvShellItem psi);
+    void GetFolder(out ICvShellItem ppsi);
+    void GetCurrentSelection(out ICvShellItem ppsi);
+    void SetFileName([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+    void GetFileName([MarshalAs(UnmanagedType.LPWStr)] out string pszName);
+    void SetTitle([MarshalAs(UnmanagedType.LPWStr)] string pszTitle);
+    void SetOkButtonLabel([MarshalAs(UnmanagedType.LPWStr)] string pszText);
+    void SetFileNameLabel([MarshalAs(UnmanagedType.LPWStr)] string pszLabel);
+    void GetResult(out ICvShellItem ppsi);
+    void AddPlace(ICvShellItem psi, int alignment);
+    void SetDefaultExtension([MarshalAs(UnmanagedType.LPWStr)] string pszDefaultExtension);
+    void Close(int hr);
+    void SetClientGuid(ref Guid guid);
+    void ClearClientData();
+    void SetFilter(IntPtr pFilter);
+    void GetResults(out IntPtr ppenum);
+    void GetSelectedItems(out IntPtr ppsai);
+}
+public static class CvPicker {
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
+    static extern void SHCreateItemFromParsingName(string path, IntPtr pbc, ref Guid riid, out ICvShellItem item);
+    delegate bool EnumProc(IntPtr h, IntPtr l);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc p, IntPtr l);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
+    [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+
+    // Once the picker appears: make it roomy, center it, keep it above every other window, and focus it.
+    static void PlaceWhenShown(string title) {
+        var t = new Thread(() => {
+            uint me = (uint)System.Diagnostics.Process.GetCurrentProcess().Id;
+            for (int i = 0; i < 120; i++) {
+                Thread.Sleep(50);
+                IntPtr found = IntPtr.Zero;
+                EnumWindows((h, l) => {
+                    uint pid; GetWindowThreadProcessId(h, out pid);
+                    if (pid == me && IsWindowVisible(h)) {
+                        var sb = new StringBuilder(256); GetWindowText(h, sb, 256);
+                        if (sb.ToString() == title) found = h;
+                    }
+                    return true;
+                }, IntPtr.Zero);
+                if (found != IntPtr.Zero) {
+                    int sw = GetSystemMetrics(0), sh = GetSystemMetrics(1);
+                    int w = Math.Min(1100, (int)(sw * 0.72)), hgt = Math.Min(700, (int)(sh * 0.75));
+                    SetWindowPos(found, new IntPtr(-1), (sw - w) / 2, (sh - hgt) / 2, w, hgt, 0x0040);   // HWND_TOPMOST, SWP_SHOWWINDOW
+                    keybd_event(0x12, 0, 0, UIntPtr.Zero); keybd_event(0x12, 0, 2, UIntPtr.Zero);        // lift the foreground lock
+                    SetForegroundWindow(found);
+                    break;
+                }
+            }
+        });
+        t.IsBackground = true; t.Start();
+    }
+
+    public static string Pick(string title, string start) {
+        var dlg = (ICvFileOpenDialog)new CvFileOpenDialog();
+        uint opts; dlg.GetOptions(out opts);
+        dlg.SetOptions(opts | 0x20 | 0x40 | 0x800 | 0x8);   // pick folders, file system only, path must exist, keep cwd
+        dlg.SetTitle(title);
+        dlg.SetOkButtonLabel("Select folder");
+        if (!string.IsNullOrEmpty(start)) {
+            try {
+                Guid iid = new Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE");
+                ICvShellItem item; SHCreateItemFromParsingName(start, IntPtr.Zero, ref iid, out item);
+                dlg.SetFolder(item);
+            } catch { }
+        }
+        PlaceWhenShown(title);
+        if (dlg.Show(IntPtr.Zero) != 0) return "";
+        ICvShellItem res; dlg.GetResult(out res);
+        string path; res.GetDisplayName(0x80058000, out path);   // SIGDN_FILESYSPATH
+        return path;
+    }
 }
 "@
-$o = New-Object System.Windows.Forms.Form
-$o.TopMost = $true; $o.ShowInTaskbar = $false; $o.Opacity = 0
-$o.StartPosition = 'CenterScreen'; $o.Size = New-Object System.Drawing.Size(1, 1)
-$o.Show()
-[CvFront]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)
-[CvFront]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
-[void][CvFront]::SetForegroundWindow($o.Handle)
-$o.Activate()
-$f = New-Object System.Windows.Forms.FolderBrowserDialog
-$f.ShowNewFolderButton = $true
-if ($f.ShowDialog($o) -eq 'OK') { [Console]::Out.Write($f.SelectedPath) }
-$o.Dispose()
+    Add-Type -TypeDefinition $cvSrc
+    $picked = [CvPicker]::Pick($title, $start)
+} catch {
+    # Fallback: classic tree-style dialog, kept on top by an invisible always-on-top owner window
+    $o = New-Object System.Windows.Forms.Form
+    $o.TopMost = $true; $o.ShowInTaskbar = $false; $o.Opacity = 0
+    $o.StartPosition = 'CenterScreen'; $o.Size = New-Object System.Drawing.Size(1, 1)
+    $o.Show(); $o.Activate()
+    $f = New-Object System.Windows.Forms.FolderBrowserDialog
+    $f.Description = $title
+    $f.ShowNewFolderButton = $true
+    if ($start -and (Test-Path -LiteralPath $start)) { $f.SelectedPath = $start }
+    if ($f.ShowDialog($o) -eq 'OK') { $picked = $f.SelectedPath }
+    $o.Dispose()
+}
+if ($picked) { [Console]::Out.Write($picked) }
 '''
+
+
+def _ps_str(value):
+    """Quote text as a PowerShell single-quoted string literal."""
+    return "'" + str(value).replace("'", "''") + "'"
 
 _FRONT_SCRIPT = r'''
 Add-Type -TypeDefinition @"
@@ -287,8 +399,17 @@ def _powershell(script, **kw):
     return ["powershell", "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-EncodedCommand", encoded]
 
 
+class BrowseRequest(BaseModel):
+    start: str = ""   # folder the picker opens in (the one already chosen)
+    title: str = ""
+
+
 @app.post("/api/browse")
-def browse():
+def browse(req: BrowseRequest | None = None):
+    start = req.start.strip() if req and req.start else ""
+    if start and not os.path.isdir(start):
+        start = ""
+    title = (req.title.strip() if req and req.title else "") or "Select a folder"
     if not _browse_lock.acquire(blocking=False):
         # A folder window is already open: raise it, then share its result
         proc = _browse_state["proc"]
@@ -302,7 +423,8 @@ def browse():
             pass
         return {"path": _browse_state["path"]}
     try:
-        proc = subprocess.Popen(_powershell(_DIALOG_SCRIPT), stdout=subprocess.PIPE,
+        script = _DIALOG_SCRIPT.replace("__TITLE__", _ps_str(title)).replace("__START__", _ps_str(start))
+        proc = subprocess.Popen(_powershell(script), stdout=subprocess.PIPE,
                                 text=True, creationflags=NOWIN)
         _browse_state["proc"], _browse_state["path"] = proc, ""
         out, _ = proc.communicate()

@@ -407,7 +407,7 @@ function raiseFolderWindow() {
   raising = true;
   post('/api/browse/raise').catch(() => {}).finally(() => { raising = false; });
 }
-async function browse(after) {
+async function browse(after, title) {
   if (browseStarting) return;
   if (browsePending) { raiseFolderWindow(); return; }
   try {
@@ -433,7 +433,7 @@ async function browse(after) {
       // (the helper never opens a second one) - and never fall back to Chrome's picker.
       browsePending++; paintBrowse();
       let r;
-      try { r = await post('/api/browse'); } finally { browsePending--; paintBrowse(); }
+      try { r = await post('/api/browse', { start: folder, title }); } finally { browsePending--; paintBrowse(); }
       if (r.path) { setFolder(r.path); if (after) after(); }
     } else {
       if (!hasFS) return alert('Please use Chrome or Edge on desktop.');
@@ -446,8 +446,8 @@ async function browse(after) {
   } catch (e) { if (e.name !== 'AbortError') alert('Could not open folder: ' + e.message); }
   finally { browseStarting = false; paintBrowse(); }
 }
-$('browseDl').onclick = () => browse();
-$('browseRv').onclick = () => browse(loadCandidates);
+$('browseDl').onclick = () => browse(undefined, 'Select the download folder');
+$('browseRv').onclick = () => browse(loadCandidates, 'Select the folder that contains the candidate folders');
 $('reload').onclick = loadCandidates;
 
 /* ── Settings ── */
