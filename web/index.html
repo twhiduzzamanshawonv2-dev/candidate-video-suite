@@ -123,7 +123,7 @@
   </div>
 
   <div id="checks" class="card narrow">
-    <div class="row"><b style="flex:1">System check <span id="checkSummary" class="badge"></span></b><button id="recheck">Re-check</button></div>
+    <div class="row"><b style="flex:1">System check <span id="checkSummary" class="badge"></span></b><span id="recheckMsg" class="mono" style="margin-right:8px"></span><button id="recheck">Re-check</button></div>
     <div id="checkList" style="margin-top:6px"></div>
     <div id="checkSetup" class="dd hidden" style="margin-top:10px;color:var(--muted);font-size:12px">
       <b style="color:var(--text)">Install the helper (one time, ~2 min):</b>
@@ -292,12 +292,16 @@ function setConnected(ok, info) {
   if (ok !== was) { setFolder(ok ? store.get('folder', '') : (dirHandle ? dirHandle.name : '')); cur = null; loadCandidates(); }
 }
 let pingFails = 0;
-async function checkHelper() {
-  try { pingFails = 0; setConnected(true, await api('/api/ping')); }
-  catch {
-    // one missed check (busy PC, slow start) must not flip modes and wipe the typed path
+async function checkHelper(force) {
+  try {
+    const signal = AbortSignal.timeout ? AbortSignal.timeout(3000) : undefined;
+    const info = await api('/api/ping', { signal });
+    pingFails = 0; setConnected(true, info);
+  } catch {
+    // background polling tolerates one missed check (busy PC) so it can't wipe the typed path;
+    // a manual Re-check is authoritative
     pingFails++;
-    if (pingFails >= 2 || !connected) setConnected(false);
+    if (force || pingFails >= 2 || !connected) setConnected(false);
   }
 }
 function showHelperBanner() { if (!connected) $('helperBanner').classList.remove('hidden'); }
@@ -317,7 +321,27 @@ $('copyCmd').onclick = async () => {
   try { await navigator.clipboard.writeText(cmd); $('copyMsg').textContent = ' Copied – open PowerShell, paste, Enter.'; }
   catch { $('copyMsg').textContent = ' ' + cmd; }
 };
-$('recheck').onclick =() => { runWasmCheck(); checkHelper(); };
+let rechecking = false;
+$('recheck').onclick = async () => {
+  if (rechecking) return;
+  rechecking = true;
+  const btn = $('recheck'), msg = $('recheckMsg');
+  btn.disabled = true; btn.textContent = 'Checking…'; msg.textContent = '';
+  try {
+    runWasmCheck();
+    await checkHelper(true);
+    if (!connected) {
+      msg.textContent = 'Helper not running – trying to start it…';
+      launchHelper();                       // works once Setup has registered cvhelper://
+      await new Promise((r) => setTimeout(r, 3500));
+      await checkHelper(true);
+    }
+    msg.textContent = connected ? '✓ Helper connected' : 'Helper still not found – run Setup, then Re-check';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Re-check'; rechecking = false;
+    setTimeout(() => { if ($('recheckMsg').textContent.startsWith('✓')) $('recheckMsg').textContent = ''; }, 4000);
+  }
+};
 updateStatus();
 runWasmCheck(); renderChecks();
 checkHelper(); setInterval(checkHelper, 5000);
