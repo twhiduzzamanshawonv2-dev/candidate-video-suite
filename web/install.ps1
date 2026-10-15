@@ -15,6 +15,8 @@ function Fail($m) { Write-Host "[X] $m" -ForegroundColor Red; throw $m }
 
 # Invoke-WebRequest can stall on big files; curl.exe (Windows 10 1803+) retries, resumes and aborts stalled transfers
 function Get-File($url, $out) {
+    # curl -C - would append to a leftover file from an earlier run and corrupt it
+    if (Test-Path $out) { Remove-Item $out -Force }
     $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
     if ($curl) {
         & $curl.Source -L --fail --silent --show-error --retry 5 --retry-delay 2 --connect-timeout 20 --speed-time 30 --speed-limit 5000 -C - -o $out $url
@@ -77,6 +79,9 @@ if ($needLibs) {
     & $py -m pip install --no-warn-script-location --disable-pip-version-check fastapi uvicorn requests
     if ($LASTEXITCODE -ne 0) { Fail 'Library installation failed.' }
 } else { Step 'Python and libraries already installed.' }
+
+& $py -m py_compile $helper
+if ($LASTEXITCODE -ne 0) { Fail 'helper.py is damaged (bad download). Run setup again.' }
 
 # 3. FFmpeg (private copy, unless one is already on PATH)
 $ffDir = Join-Path $dir 'ffmpeg'
