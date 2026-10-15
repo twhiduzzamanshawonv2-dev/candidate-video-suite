@@ -64,6 +64,8 @@
   .banner b { color:var(--text); }
   .banner a { color:var(--accent); }
   .hidden { display:none !important; }
+  /* the System check and the helper banner belong to the Download Manager only */
+  body[data-view="rv"] #checks, body[data-view="rv"] #helperBanner { display:none !important; }
   table { width:100%; border-collapse:collapse; font-size:12px; }
   th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   th { color:var(--muted); font-weight:500; }
@@ -370,6 +372,7 @@ paintThemeBtn();
 
 /* ── Navigation ── */
 function showView(v) {
+  document.body.dataset.view = v;   // CSS hides the System check / helper banner outside the Download Manager
   $('dlView').classList.toggle('hidden', v !== 'dl');
   $('rvView').classList.toggle('hidden', v !== 'rv');
   $('navDl').classList.toggle('active', v === 'dl');
