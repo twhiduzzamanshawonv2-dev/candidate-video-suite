@@ -97,9 +97,44 @@
   .mono { font-family:ui-monospace,Consolas,monospace; color:var(--dim); font-size:11px; }
   input[type=range] { flex:1; accent-color:var(--text); }
   .syncdot { width:6px; height:6px; border-radius:50%; background:var(--ok); } .syncdot.warn { background:var(--warn); }
-  .chk { display:flex; gap:10px; padding:7px 0; border-top:1px solid var(--line); font-size:13px; }
+  /* System check */
+  .sc { padding:0; overflow:hidden; }
+  .sc-head { display:flex; align-items:center; gap:14px; padding:16px 18px; flex-wrap:wrap; }
+  .sc-icon { width:46px; height:46px; border-radius:50%; display:grid; place-items:center; flex:none; background:var(--line); color:var(--muted); transition:background .25s, color .25s; }
+  .sc-icon svg { width:24px; height:24px; }
+  .sc-icon.ok { background:var(--b-ok-bg); color:var(--ok); }
+  .sc-icon.warn { background:var(--b-warn-bg); color:var(--warn); }
+  .sc-icon.bad { background:var(--b-bad-bg); color:var(--err); }
+  .sc-icon.info { background:var(--line); color:var(--accent); }
+  .sc-main { flex:1; min-width:220px; }
+  .sc-title { font-size:17px; font-weight:650; letter-spacing:-.01em; }
+  .sc-sub { font-size:12.5px; color:var(--muted); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .sc-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  button.ghost { display:inline-flex; align-items:center; gap:6px; background:transparent; }
+  button.ghost svg { transition:transform .2s; }
+  button.ghost.busy svg { animation:cv-spin .8s linear infinite; }
+  #scToggle[aria-expanded="true"] #scChev { transform:rotate(180deg); }
+  @keyframes cv-spin { to { transform:rotate(360deg); } }
+  .sc-chips { display:flex; flex-wrap:wrap; gap:8px; padding:0 18px 16px; }
+  .chip { display:inline-flex; align-items:center; gap:7px; font-size:12px; font-weight:500; padding:5px 12px 5px 10px; border-radius:99px; border:1px solid var(--line); color:var(--muted); background:var(--bg); max-width:100%; }
+  .chip i { width:8px; height:8px; border-radius:50%; background:var(--dim); flex:none; }
+  .chip.ok { background:var(--b-ok-bg); color:var(--b-ok-fg); border-color:transparent; } .chip.ok i { background:var(--ok); }
+  .chip.warn { background:var(--b-warn-bg); color:var(--b-warn-fg); border-color:transparent; } .chip.warn i { background:var(--warn); }
+  .chip.bad { background:var(--b-bad-bg); color:var(--b-bad-fg); border-color:transparent; } .chip.bad i { background:var(--err); }
+  .sc-details { border-top:1px solid var(--line); padding:4px 18px 8px; }
+  .chk { display:flex; gap:12px; align-items:flex-start; padding:11px 0; border-top:1px solid var(--line); font-size:13px; }
   .chk:first-child { border-top:0; }
-  .chk .ic { width:20px; text-align:center; }
+  .chk .ic { width:22px; height:22px; border-radius:50%; display:grid; place-items:center; font-size:12px; font-weight:700; flex:none; background:var(--line); color:var(--muted); }
+  .chk .ic.ok { background:var(--b-ok-bg); color:var(--ok); } .chk .ic.warn { background:var(--b-warn-bg); color:var(--warn); } .chk .ic.bad { background:var(--b-bad-bg); color:var(--err); }
+  .sc-setup { border-top:1px solid var(--line); padding:16px 18px; background:var(--bg); }
+  .sc-setup-title { font-weight:600; font-size:14px; margin-bottom:10px; }
+  .sc-setup-title .mono { font-weight:400; margin-left:6px; }
+  .sc-setup-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .sc-or { font-size:12px; color:var(--muted); }
+  .sc-setup-note { margin-top:10px; font-size:12px; color:var(--muted); }
+  a.btnlink { display:inline-flex; align-items:center; gap:7px; border-radius:8px; padding:7px 14px; font-size:13px; font-weight:600; text-decoration:none; border:1px solid var(--line); color:var(--text); }
+  a.btnlink.primary { background:var(--text); color:var(--bg); border-color:var(--text); }
+  a.btnlink.primary:hover { background:var(--primary-hover); }
   .chk .tt { font-weight:500; } .chk .dd { color:var(--muted); font-size:12px; }
   .badge { font-size:11px; padding:2px 8px; border-radius:99px; margin-left:8px; font-weight:500; }
   .badge.ok { background:var(--b-ok-bg); color:var(--b-ok-fg); } .badge.warn { background:var(--b-warn-bg); color:var(--b-warn-fg); } .badge.bad { background:var(--b-bad-bg); color:var(--b-bad-fg); }
@@ -124,15 +159,39 @@
     Open this page in <b>Chrome or Edge</b> (desktop). Nothing needs to be installed.
   </div>
 
-  <div id="checks" class="card narrow">
-    <div class="row"><b style="flex:1">System check <span id="checkSummary" class="badge"></span></b><span id="recheckMsg" class="mono" style="margin-right:8px"></span><button id="recheck">Re-check</button></div>
-    <div id="checkList" style="margin-top:6px"></div>
-    <div id="checkSetup" class="dd hidden" style="margin-top:10px;color:var(--muted);font-size:12px">
-      <b style="color:var(--text)">Install the helper (one time, ~2 min):</b>
-      <a href="Setup.bat" download style="color:var(--accent)">Download Setup.bat</a> and double-click it
-      &nbsp;or&nbsp; <button id="copyCmd" style="padding:3px 10px;font-size:12px">Copy command</button> and paste it into PowerShell.
-      Python and FFmpeg are downloaded automatically (no admin, no winget). Then click Re-check.
-      <span id="copyMsg" class="mono"></span>
+  <div id="checks" class="card narrow sc">
+    <div class="sc-head">
+      <div id="scIcon" class="sc-icon wait" aria-hidden="true"></div>
+      <div class="sc-main">
+        <div id="scTitle" class="sc-title">Checking your PC…</div>
+        <div id="scSub" class="sc-sub">Looking for the local helper</div>
+      </div>
+      <div class="sc-actions">
+        <span id="recheckMsg" class="mono"></span>
+        <button id="recheck" class="ghost" title="Check everything again">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+          <span class="lbl">Re-check</span>
+        </button>
+        <button id="scToggle" class="ghost" aria-expanded="false">
+          <span id="scToggleLbl">Details</span>
+          <svg id="scChev" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+      </div>
+    </div>
+    <div id="scChips" class="sc-chips"></div>
+    <div id="scDetails" class="sc-details hidden"><div id="checkList"></div></div>
+    <div id="checkSetup" class="sc-setup hidden">
+      <div class="sc-setup-title">Install the helper <span class="mono">one time, about 2 minutes</span></div>
+      <div class="sc-setup-actions">
+        <a class="btnlink primary" href="Setup.bat" download>
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M5 21h14"/></svg>
+          Download Setup.bat
+        </a>
+        <span class="sc-or">then double-click it &nbsp;·&nbsp; or</span>
+        <button id="copyCmd" class="ghost">Copy command for PowerShell</button>
+        <span id="copyMsg" class="mono"></span>
+      </div>
+      <div class="sc-setup-note">Python and FFmpeg are downloaded for you (no admin rights, no winget). When it says Done, click Re-check.</div>
     </div>
   </div>
 
@@ -258,36 +317,74 @@ function updateStatus(info) {
 }
 const MIN_HELPER = 1.5;   // oldest helper version this page works well with
 let folder = '', helperInfo = null, wasmOk = null;
+let checksOpen = null;   // null = automatic (opens itself only when something needs attention)
+const SC_ICONS = {
+  ok:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>',
+  warn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>',
+  bad:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M15 9l-6 6M9 9l6 6"/></svg>',
+  info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
+  wait: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+};
 function renderChecks() {
   const ua = navigator.userAgent;
   const chromium = /Chrome\/|Edg\//.test(ua) && !/Mobile/.test(ua);
+  const ver = parseFloat(helperInfo?.version);
+  const helperOk = connected && ver >= MIN_HELPER;
+  const folderName = folder ? (folder.split(/[\\/]/).filter(Boolean).pop() || folder) : '';
+  const py = helperInfo?.python ? helperInfo.python.split('.').slice(0, 2).join('.') : '';
   const items = [
-    { s: hasFS && chromium ? 'ok' : 'bad', t: 'Browser',
-      d: hasFS && chromium ? 'Chrome/Edge on desktop – folder access supported' : 'Open this page in desktop Chrome or Edge' },
-    { s: wasmOk === null ? 'wait' : wasmOk ? 'ok' : 'warn', t: 'In-browser converter',
-      d: wasmOk === null ? 'Checking…' : wasmOk ? 'FFmpeg.wasm bundle available (slow fallback)' : 'FFmpeg.wasm files could not be loaded' },
-    { s: connected ? (parseFloat(helperInfo?.version) >= MIN_HELPER ? 'ok' : 'warn') : 'warn', t: 'Local helper',
-      d: connected ? (parseFloat(helperInfo?.version) >= MIN_HELPER
-                      ? `Running (v${helperInfo?.version}) – downloads go straight to this PC`
-                      : `Running v${helperInfo?.version || '?'} but OUTDATED (need v${MIN_HELPER}) – run Setup again to update (fixes extra folder windows)`)
-                   : 'Not detected – required for links that block browsers (CORS). Download the setup below, or click Re-check if it is already installed' },
-    { s: !connected ? 'wait' : helperInfo?.python ? 'ok' : 'warn', t: 'Python',
-      d: !connected ? 'Checked once the helper is running' : helperInfo?.python ? 'Python ' + helperInfo.python : 'Unknown' },
-    { s: !connected ? 'wait' : helperInfo?.ffmpeg ? 'ok' : 'bad', t: 'FFmpeg (fast conversion)',
+    { s: hasFS && chromium ? 'ok' : 'bad', t: 'Browser', chip: 'Browser',
+      d: hasFS && chromium ? 'Chrome or Edge – everything this page needs is supported' : 'Open this page in desktop Chrome or Edge' },
+    { s: helperOk ? 'ok' : 'warn', t: 'Local helper', chip: connected ? `Helper v${helperInfo?.version || '?'}` : 'Helper',
+      d: helperOk ? 'Connected – downloads go straight to this PC'
+        : connected ? `Version ${helperInfo?.version || '?'} is out of date (need ${MIN_HELPER}) – run Setup again to update`
+        : 'Not running – needed to download most video links' },
+    { s: !connected ? 'wait' : helperInfo?.python ? 'ok' : 'warn', t: 'Python', chip: py ? `Python ${py}` : 'Python',
+      d: !connected ? 'Checked once the helper is running' : helperInfo?.python ? `Python ${helperInfo.python}` : 'Unknown' },
+    { s: !connected ? 'wait' : helperInfo?.ffmpeg ? 'ok' : 'bad', t: 'FFmpeg (fast .mp4 conversion)', chip: 'FFmpeg',
       d: !connected ? 'Checked once the helper is running'
-        : helperInfo?.ffmpeg ? (helperInfo.ffmpeg_version || 'Installed') + (helperInfo.ffprobe ? '' : ' – ffprobe missing (progress % unavailable)')
-        : 'Not installed – re-run Setup.bat (or: winget install GYAN.FFmpeg). Convert mode needs it' },
-    { s: folder ? 'ok' : 'wait', t: 'Download folder',
-      d: folder ? folder : 'Not selected yet – use Browse' },
+        : helperInfo?.ffmpeg ? (helperInfo.ffmpeg_version || 'Installed') + (helperInfo.ffprobe ? '' : ' – ffprobe missing, so progress % is unavailable')
+        : 'Not installed – run Setup again (Convert mode needs it)' },
+    { s: folder ? 'ok' : 'wait', t: 'Download folder', chip: folder ? folderName : 'Folder',
+      d: folder ? folder : 'Not chosen yet – click Browse below' },
+    { s: wasmOk === null ? 'wait' : wasmOk ? 'ok' : 'warn', t: 'Built-in converter', chip: null,
+      d: wasmOk === null ? 'Checking…' : wasmOk ? 'Available as a slower backup if the helper is off' : 'Backup converter files could not be loaded' },
   ];
-  const icon = { ok: '✅', bad: '❌', warn: '⚠️', wait: '⚪' };
-  $('checkList').innerHTML = items.map((i) => `<div class="chk"><span class="ic">${icon[i.s]}</span><div><div class="tt">${i.t}</div><div class="dd">${esc(i.d)}</div></div></div>`).join('');
-  const bad = items.some((i) => i.s === 'bad'), warn = items.some((i) => i.s === 'warn');
-  $('checkSetup').classList.toggle('hidden', connected && parseFloat(helperInfo?.version) >= MIN_HELPER);
-  const sum = $('checkSummary');
-  sum.className = 'badge ' + (bad ? 'bad' : warn ? 'warn' : 'ok');
-  sum.textContent = bad ? 'Action needed' : warn ? 'Helper recommended' : 'All good';
+
+  // headline
+  const bad = items.find((i) => i.s === 'bad'), warn = items.find((i) => i.s === 'warn');
+  let mode, title, sub;
+  if (!firstCheckDone && !connected) { mode = 'wait'; title = 'Checking your PC…'; sub = 'Looking for the local helper'; }
+  else if (bad) { mode = 'bad'; title = 'Action needed'; sub = `${bad.t}: ${bad.d}`; }
+  else if (warn) {
+    mode = 'warn';
+    title = !connected ? 'One more step: install the helper' : 'Helper update available';
+    sub = warn.d;
+  }
+  else if (!folder) { mode = 'info'; title = 'Almost ready'; sub = 'Choose a download folder below to get started.'; }
+  else { mode = 'ok'; title = 'Ready to download'; sub = `Helper v${helperInfo?.version} · FFmpeg ready · Saving to ${folder}`; }
+
+  const icon = $('scIcon'); icon.className = 'sc-icon ' + mode; icon.innerHTML = SC_ICONS[mode];
+  $('scTitle').textContent = title; $('scSub').textContent = sub; $('scSub').title = sub;
+
+  // chips
+  $('scChips').innerHTML = items.filter((i) => i.chip).map((i) =>
+    `<span class="chip ${i.s}" title="${esc(i.t + ': ' + i.d)}"><i></i>${esc(i.chip)}</span>`).join('');
+
+  // details (open by itself only when something needs attention)
+  const open = checksOpen === null ? (mode === 'bad' || mode === 'warn') : checksOpen;
+  const mark = { ok: '✓', bad: '✕', warn: '!', wait: '·' };
+  $('checkList').innerHTML = items.map((i) =>
+    `<div class="chk"><span class="ic ${i.s}">${mark[i.s]}</span><div><div class="tt">${esc(i.t)}</div><div class="dd">${esc(i.d)}</div></div></div>`).join('');
+  $('scDetails').classList.toggle('hidden', !open);
+  $('scToggle').setAttribute('aria-expanded', String(open));
+  $('scToggleLbl').textContent = open ? 'Hide details' : 'Details';
+  $('checkSetup').classList.toggle('hidden', helperOk || !firstCheckDone);
 }
+$('scToggle').onclick = () => {
+  checksOpen = !($('scToggle').getAttribute('aria-expanded') === 'true');
+  renderChecks();
+};
 function runWasmCheck() {
   fetch('vendor/ffmpeg-core.wasm', { method: 'HEAD' }).then((r) => { wasmOk = r.ok; renderChecks(); }).catch(() => { wasmOk = false; renderChecks(); });
 }
@@ -333,7 +430,7 @@ $('recheck').onclick = async () => {
   if (rechecking) return;
   rechecking = true;
   const btn = $('recheck'), msg = $('recheckMsg');
-  btn.disabled = true; btn.textContent = 'Checking…'; msg.textContent = '';
+  btn.disabled = true; btn.classList.add('busy'); btn.querySelector('.lbl').textContent = 'Checking…'; msg.textContent = '';
   try {
     runWasmCheck();
     await checkHelper(true);
@@ -345,7 +442,7 @@ $('recheck').onclick = async () => {
     }
     msg.textContent = connected ? '✓ Helper connected' : 'Helper still not found – run Setup, then Re-check';
   } finally {
-    btn.disabled = false; btn.textContent = 'Re-check'; rechecking = false;
+    btn.disabled = false; btn.classList.remove('busy'); btn.querySelector('.lbl').textContent = 'Re-check'; rechecking = false;
     setTimeout(() => { if ($('recheckMsg').textContent.startsWith('✓')) $('recheckMsg').textContent = ''; }, 4000);
   }
 };
