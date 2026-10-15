@@ -1,0 +1,634 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Candidate Video Suite</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root {
+    --bg:#09090b; --panel:#18181b; --line:#27272a; --line2:#3f3f46;
+    --text:#fafafa; --muted:#a1a1aa; --dim:#52525b;
+    --accent:#3b82f6; --ok:#22c55e; --warn:#f59e0b; --err:#ef4444;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif; }
+  header { display:flex; align-items:center; gap:16px; padding:12px 20px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0; font-weight:600; }
+  nav { display:flex; gap:6px; }
+  .grow { flex:1; }
+  button, select, input[type=text], input[type=number] {
+    background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:8px;
+    padding:7px 12px; font:inherit; font-size:13px;
+  }
+  button { cursor:pointer; color:var(--muted); font-weight:500; }
+  button:hover:not(:disabled) { background:var(--line); color:var(--text); }
+  button:disabled { opacity:.4; cursor:default; }
+  button.primary { background:var(--text); color:var(--bg); border-color:var(--text); font-weight:600; }
+  button.primary:hover:not(:disabled) { background:#e4e4e7; color:var(--bg); }
+  button.active { background:var(--line); color:var(--text); }
+  input:focus, select:focus { outline:none; border-color:var(--accent); }
+  .pill { display:flex; align-items:center; gap:7px; font-size:12px; color:var(--muted); }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--err); }
+  .dot.on { background:var(--ok); }
+  main { padding:20px; max-width:1500px; margin:0 auto; }
+  .narrow { max-width:820px; margin:0 auto; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; }
+  .card h3 { margin:0 0 10px; font-size:13px; }
+  label { display:block; font-size:12px; color:var(--muted); margin:10px 0 4px; }
+  input[type=text] { width:100%; }
+  .row { display:flex; gap:8px; align-items:center; }
+  .row > input { flex:1; }
+  .settings { display:flex; gap:16px; flex-wrap:wrap; align-items:flex-end; }
+  .settings label { margin:0 0 4px; }
+  .banner { background:#1c1917; border:1px solid var(--warn); border-radius:12px; padding:14px 16px; margin-bottom:14px; color:var(--muted); }
+  .banner b { color:var(--text); }
+  .banner a { color:var(--accent); }
+  .hidden { display:none !important; }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  th { color:var(--muted); font-weight:500; }
+  .tablewrap { max-height:340px; overflow:auto; border:1px solid var(--line); border-radius:8px; margin:10px 0; }
+  .prog { margin:8px 0; }
+  .prog .t { display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-bottom:3px; }
+  .bar { height:6px; background:var(--line); border-radius:4px; overflow:hidden; }
+  .bar > i { display:block; height:100%; background:var(--accent); width:0; transition:width .3s; }
+  .bar.done > i { background:var(--ok); }
+  .bar.failed > i { background:var(--err); }
+  .msg { font-size:13px; margin-top:8px; }
+  .msg.ok { color:var(--ok); } .msg.err { color:var(--err); }
+  .stats { display:flex; gap:24px; margin:10px 0; }
+  .stats div { font-size:12px; color:var(--muted); } .stats b { display:block; font-size:22px; color:var(--text); }
+  .tabs { display:flex; gap:6px; margin-bottom:12px; }
+
+  /* Reviewer */
+  .toolbar { display:grid; grid-template-columns:auto 1fr auto auto auto; gap:8px; margin-bottom:10px; align-items:center; }
+  .videos { display:flex; gap:8px; }
+  .panel { flex:1; background:var(--panel); border:1px solid var(--line); border-radius:10px; overflow:hidden; display:flex; flex-direction:column; min-width:0; }
+  .vlabel { display:flex; justify-content:space-between; padding:7px 12px; font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); border-bottom:1px solid var(--line); }
+  .vlabel .rev { color:#86efac; }
+  .vwrap { position:relative; height:56vh; background:#000; }
+  video { width:100%; height:100%; object-fit:contain; display:block; }
+  .ended { display:none; position:absolute; inset:0; background:rgba(9,9,11,.72); align-items:center; justify-content:center; color:var(--warn); font-size:12px; pointer-events:none; }
+  .ended.on { display:flex; }
+  .vfoot { display:flex; align-items:center; gap:8px; padding:7px 12px; border-top:1px solid var(--line); }
+  .controls { margin-top:8px; background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 14px; display:flex; flex-direction:column; gap:8px; }
+  .mono { font-family:ui-monospace,Consolas,monospace; color:var(--dim); font-size:11px; }
+  input[type=range] { flex:1; accent-color:#fafafa; }
+  .syncdot { width:6px; height:6px; border-radius:50%; background:var(--ok); } .syncdot.warn { background:var(--warn); }
+  .empty { height:300px; display:flex; align-items:center; justify-content:center; color:var(--line2); }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎥 Candidate Video Suite</h1>
+  <nav>
+    <button id="navDl" class="active">📥 Download Manager</button>
+    <button id="navRv">🎥 Video Reviewer</button>
+  </nav>
+  <span class="grow"></span>
+  <span class="pill"><span class="dot" id="dot"></span><span id="status">Checking helper…</span></span>
+</header>
+
+<main>
+  <div id="setup" class="banner hidden">
+    <b>This browser can't access local folders.</b>
+    Open this page in <b>Chrome or Edge</b> (desktop). Nothing needs to be installed.
+  </div>
+
+  <!-- DOWNLOAD VIEW -->
+  <section id="dlView" class="narrow">
+    <div class="card">
+      <h3>Download Destination Folder</h3>
+      <div class="row">
+        <input type="text" id="folderDl" placeholder="Please select a folder…">
+        <button id="browseDl">📁 Browse</button>
+      </div>
+    </div>
+
+    <div class="card settings">
+      <div><label>Output Mode</label>
+        <select id="mode">
+          <option value="convert">Convert (.mp4)</option>
+          <option value="original">Original (.webm)</option>
+          <option value="rename">Rename (.mp4)</option>
+        </select></div>
+      <div id="presetBox"><label>FFmpeg Preset</label>
+        <select id="preset">
+          <option>ultrafast</option><option>superfast</option><option>veryfast</option><option>faster</option>
+        </select></div>
+      <div><label>⚡ Parallel Workers</label>
+        <input type="number" id="workers" min="1" max="10" value="4" style="width:80px"></div>
+    </div>
+
+    <div class="tabs">
+      <button id="tabSingle" class="active">👤 Single Candidate</button>
+      <button id="tabBulk">📂 Bulk Upload (CSV/Excel)</button>
+    </div>
+
+    <div id="single" class="card">
+      <label>Candidate ID</label><input type="text" id="cid" placeholder="e.g. 1217">
+      <label>Screen Record URL</label><input type="text" id="surl" placeholder="https://...">
+      <label>Webcam Record URL</label><input type="text" id="wurl" placeholder="https://...">
+      <div style="margin-top:14px"><button class="primary" id="startSingle">🚀 Start Single Process</button></div>
+    </div>
+
+    <div id="bulk" class="card hidden">
+      <input type="file" id="file" accept=".csv,.xlsx,.xls">
+      <div id="bulkInfo" class="msg"></div>
+      <div id="bulkTools" class="hidden">
+        <div class="row" style="margin-top:10px">
+          <b style="flex:1">📋 Candidate List</b>
+          <button id="markAll">Mark All</button><button id="unmarkAll">Unmark All</button>
+        </div>
+        <div class="tablewrap"><table id="bulkTable"></table></div>
+        <button class="primary" id="startBulk">🚀 Process Selected Candidates</button>
+      </div>
+    </div>
+
+    <div id="jobCard" class="card hidden">
+      <h3>Progress</h3>
+      <div class="prog"><div class="t"><span id="overallLabel">Overall</span></div><div class="bar" id="overallBar"><i></i></div></div>
+      <div id="jobFiles"></div>
+      <div id="jobMsg" class="msg"></div>
+      <div id="summary" class="hidden">
+        <div class="stats"><div>Total<b id="sTotal">0</b></div><div>Success<b id="sOk">0</b></div><div>Failed / Partial<b id="sBad">0</b></div></div>
+        <div class="tablewrap"><table id="sumTable"></table></div>
+      </div>
+    </div>
+
+    <div id="historyCard" class="card hidden"><h3>📊 Session History</h3><table id="historyTable"></table></div>
+  </section>
+
+  <!-- REVIEW VIEW -->
+  <section id="rvView" class="hidden">
+    <div class="row" style="margin-bottom:8px">
+      <input type="text" id="folderRv" placeholder="Paste video folder path here…">
+      <button id="browseRv">Browse</button>
+      <button id="reload">Reload</button>
+    </div>
+    <div class="toolbar">
+      <button id="prev">◀ Prev</button>
+      <select id="candSel"></select>
+      <button id="next">Next ▶</button>
+      <button id="nextUnrev">Next Unreviewed</button>
+      <button id="markRev" class="primary">✓ Mark Reviewed</button>
+    </div>
+    <div id="player"><div class="empty">Select a candidate above to begin review.</div></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+const API = store.get('helperUrl', 'http://127.0.0.1:8765');
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+async function api(path, opts) {
+  const r = await fetch(API + path, opts);
+  if (!r.ok) {
+    let m = r.statusText;
+    try { m = (await r.json()).detail || m; } catch {}
+    throw new Error(m);
+  }
+  return r.json();
+}
+const post = (path, body) => api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+
+/* ── Backend: browser mode (default, nothing to install) or optional local helper ── */
+const hasFS = 'showDirectoryPicker' in window;
+let connected = false;           // optional local helper detected
+let dirHandle = null;            // folder picked in browser mode
+const useHelper = () => connected;
+function updateStatus(info) {
+  const ok = connected || hasFS;
+  $('dot').classList.toggle('on', ok);
+  $('status').textContent = connected
+    ? 'Local helper connected' + (info && !info.ffmpeg ? ' · FFmpeg missing' : '')
+    : hasFS ? 'Browser mode' : 'Unsupported browser';
+  $('setup').classList.toggle('hidden', ok);
+  $('folderDl').readOnly = $('folderRv').readOnly = !connected;
+}
+function setConnected(ok, info) {
+  const was = connected; connected = ok;
+  updateStatus(info);
+  if (ok !== was) { setFolder(ok ? store.get('folder', '') : (dirHandle ? dirHandle.name : '')); cur = null; loadCandidates(); }
+}
+async function checkHelper() {
+  try { setConnected(true, await api('/api/ping')); } catch { setConnected(false); }
+}
+updateStatus();
+checkHelper(); setInterval(checkHelper, 5000);
+
+/* ── Navigation ── */
+function showView(v) {
+  $('dlView').classList.toggle('hidden', v !== 'dl');
+  $('rvView').classList.toggle('hidden', v !== 'rv');
+  $('navDl').classList.toggle('active', v === 'dl');
+  $('navRv').classList.toggle('active', v === 'rv');
+  if (v === 'rv') loadCandidates(); else stopPlayer();
+}
+$('navDl').onclick = () => showView('dl');
+$('navRv').onclick = () => showView('rv');
+
+/* ── Shared folder ── */
+let folder = '';
+function setFolder(p) {
+  folder = p;
+  if (useHelper()) store.set('folder', p);
+  $('folderDl').value = p; $('folderRv').value = p;
+}
+$('folderDl').oninput = (e) => { if (useHelper()) setFolder(e.target.value.trim()); };
+$('folderRv').onchange = (e) => { if (useHelper()) { setFolder(e.target.value.trim()); loadCandidates(); } };
+async function browse(after) {
+  try {
+    if (useHelper()) {
+      const r = await post('/api/browse');
+      if (r.path) { setFolder(r.path); if (after) after(); }
+    } else {
+      if (!hasFS) return alert('Please use Chrome or Edge on desktop.');
+      dirHandle = await showDirectoryPicker({ mode: 'readwrite' });
+      setFolder(dirHandle.name); if (after) after();
+    }
+  } catch (e) { if (e.name !== 'AbortError') alert('Could not open folder: ' + e.message); }
+}
+$('browseDl').onclick = () => browse();
+$('browseRv').onclick = () => browse(loadCandidates);
+$('reload').onclick = loadCandidates;
+
+/* ── Settings ── */
+$('mode').onchange = () => $('presetBox').classList.toggle('hidden', $('mode').value !== 'convert');
+$('tabSingle').onclick = () => tab('single');
+$('tabBulk').onclick = () => tab('bulk');
+function tab(t) {
+  $('single').classList.toggle('hidden', t !== 'single');
+  $('bulk').classList.toggle('hidden', t !== 'bulk');
+  $('tabSingle').classList.toggle('active', t === 'single');
+  $('tabBulk').classList.toggle('active', t === 'bulk');
+}
+
+/* ── Jobs ── */
+const history = [];
+async function runJob(items) {
+  if (!folder) return alert('Please select a download destination folder first!');
+  if (!useHelper()) return runBrowserJob(items);
+  $('jobCard').classList.remove('hidden'); $('summary').classList.add('hidden');
+  $('jobFiles').innerHTML = ''; $('jobMsg').textContent = ''; $('jobMsg').className = 'msg';
+  let job;
+  try {
+    job = await post('/api/jobs', {
+      folder, items, mode: $('mode').value, preset: $('preset').value,
+      workers: Math.max(1, Math.min(10, parseInt($('workers').value) || 4)),
+    });
+  } catch (e) { $('jobMsg').textContent = e.message; $('jobMsg').className = 'msg err'; return; }
+  if (!job.total) { $('jobMsg').textContent = 'No URLs to download.'; return; }
+
+  const timer = setInterval(async () => {
+    let s;
+    try { s = await api('/api/jobs/' + job.id); } catch { return; }
+    renderJob(s);
+    if (s.finished) { clearInterval(timer); finishJob(s, items); }
+  }, 700);
+}
+function renderJob(s) {
+  $('jobFiles').innerHTML = s.files.map((f) => `
+    <div class="prog"><div class="t"><span>${esc(f.cid)} · ${f.kind}</span><span>${f.status}${f.message ? ' – ' + esc(f.message) : ''} ${f.progress}%</span></div>
+    <div class="bar ${f.status === 'done' || f.status === 'exists' ? 'done' : f.status}"><i style="width:${f.progress}%"></i></div></div>`).join('');
+  const done = s.files.filter((f) => ['done', 'exists', 'failed'].includes(f.status)).length;
+  $('overallLabel').textContent = `Overall Progress (${done}/${s.files.length} files)`;
+  $('overallBar').firstElementChild.style.width = (done / s.files.length * 100) + '%';
+}
+function finishJob(s, items) {
+  const rows = items.map((it) => {
+    const fs = s.files.filter((f) => f.cid === it.id);
+    const ok = fs.filter((f) => f.status === 'done' || f.status === 'exists').length;
+    const status = fs.length && ok === fs.length ? '✅ Success' : ok ? '⚠️ Partial' : '❌ Failed';
+    history.unshift({ time: new Date().toLocaleTimeString(), id: it.id, status });
+    return { id: it.id, status };
+  });
+  $('jobMsg').textContent = 'Complete!'; $('jobMsg').className = 'msg ok';
+  $('sTotal').textContent = rows.length;
+  $('sOk').textContent = rows.filter((r) => r.status.startsWith('✅')).length;
+  $('sBad').textContent = rows.filter((r) => !r.status.startsWith('✅')).length;
+  $('sumTable').innerHTML = '<tr><th>Candidate ID</th><th>Status</th></tr>' + rows.map((r) => `<tr><td>${esc(r.id)}</td><td>${r.status}</td></tr>`).join('');
+  $('summary').classList.remove('hidden');
+  $('historyCard').classList.remove('hidden');
+  $('historyTable').innerHTML = '<tr><th>Time</th><th>ID</th><th>Status</th></tr>' + history.map((h) => `<tr><td>${h.time}</td><td>${esc(h.id)}</td><td>${h.status}</td></tr>`).join('');
+}
+
+/* ── Browser-mode download + convert (File System Access API + FFmpeg.wasm) ── */
+let ffPromise = null, ffChain = Promise.resolve(), ffCurrent = null;
+function loadScript(src) {
+  return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('Failed to load ' + src)); document.head.appendChild(s); });
+}
+function getFFmpeg() {
+  if (!ffPromise) ffPromise = (async () => {
+    await loadScript('vendor/ffmpeg.js');
+    const ff = new FFmpegWASM.FFmpeg();
+    ff.on('progress', ({ progress }) => { if (ffCurrent) ffCurrent.progress = Math.max(0, Math.min(100, Math.round(progress * 100))); });
+    await ff.load({
+      coreURL: new URL('vendor/ffmpeg-core.js', location.href).href,
+      wasmURL: new URL('vendor/ffmpeg-core.wasm', location.href).href,
+    });
+    return ff;
+  })().catch((e) => { ffPromise = null; throw e; });
+  return ffPromise;
+}
+async function writeBlob(dir, name, data) {
+  const w = await (await dir.getFileHandle(name, { create: true })).createWritable();
+  await w.write(data); await w.close();
+}
+function convertInBrowser(cdir, f, preset) {
+  // One conversion at a time: a single wasm instance (and its memory) is shared
+  const task = ffChain.then(async () => {
+    f.status = 'converting'; f.progress = 0; ffCurrent = f;
+    const ff = await getFFmpeg();
+    try {
+      const file = await (await cdir.getFileHandle(f.name + '.webm')).getFile();
+      await ff.writeFile('in.webm', new Uint8Array(await file.arrayBuffer()));
+      const code = await ff.exec(['-i', 'in.webm', '-c:v', 'libx264', '-crf', '23', '-preset', preset, '-c:a', 'aac', 'out.mp4']);
+      if (code !== 0) throw new Error('FFmpeg error');
+      await writeBlob(cdir, f.name + '.mp4', await ff.readFile('out.mp4'));
+      await cdir.removeEntry(f.name + '.webm');
+    } finally {
+      ffCurrent = null;
+      try { await ff.deleteFile('in.webm'); } catch {}
+      try { await ff.deleteFile('out.mp4'); } catch {}
+    }
+  });
+  ffChain = task.catch(() => {});
+  return task;
+}
+async function processInBrowser(f, mode, preset) {
+  let w, cdir, tmpName;
+  try {
+    cdir = await dirHandle.getDirectoryHandle(f.cid, { create: true });
+    const ext = mode === 'original' ? '.webm' : '.mp4';
+    try { await cdir.getFileHandle(f.name + ext); f.status = 'exists'; f.progress = 100; f.message = 'Already downloaded'; return; } catch {}
+    tmpName = mode === 'rename' ? f.name + '.mp4' : f.name + '.webm';
+    f.status = 'downloading';
+    const resp = await fetch(f.url);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const total = +resp.headers.get('content-length') || 0;
+    w = await (await cdir.getFileHandle(tmpName, { create: true })).createWritable();
+    const reader = resp.body.getReader(); let got = 0;
+    for (;;) {
+      const { done, value } = await reader.read(); if (done) break;
+      await w.write(value); got += value.length;
+      if (total) f.progress = Math.min(100, Math.round(got / total * 100));
+    }
+    await w.close(); w = null;
+    if (mode === 'convert') await convertInBrowser(cdir, f, preset);
+    f.status = 'done'; f.progress = 100;
+  } catch (e) {
+    if (w) { try { await w.abort(); } catch {} }
+    f.status = 'failed';
+    f.message = e instanceof TypeError
+      ? "Blocked by the source server (CORS) – use the optional local helper for these links"
+      : e.message;
+  }
+}
+async function runBrowserJob(items) {
+  if (!dirHandle) return alert('Please select a download destination folder first!');
+  const mode = $('mode').value, preset = $('preset').value;
+  const workers = Math.max(1, Math.min(10, parseInt($('workers').value) || 4));
+  const files = [];
+  for (const it of items) {
+    if (!it.id || /[\\/:*?"<>|]/.test(it.id) || it.id === '.' || it.id === '..') return alert('Invalid candidate ID: ' + it.id);
+    for (const [kind, url] of [['screenrecord', it.screen_url], ['webcam', it.webcam_url]])
+      if (url) files.push({ cid: it.id, kind, name: `${it.id}_${kind}`, url, status: 'queued', progress: 0, message: '' });
+  }
+  $('jobCard').classList.remove('hidden'); $('summary').classList.add('hidden');
+  $('jobFiles').innerHTML = ''; $('jobMsg').textContent = ''; $('jobMsg').className = 'msg';
+  if (!files.length) { $('jobMsg').textContent = 'No URLs to download.'; return; }
+  try { if ((await dirHandle.requestPermission({ mode: 'readwrite' })) !== 'granted') return alert('Write permission to the folder was denied.'); } catch {}
+
+  const timer = setInterval(() => renderJob({ files }), 300);
+  const queue = files.slice();
+  await Promise.all(Array.from({ length: Math.min(workers, queue.length) }, async () => {
+    while (queue.length) await processInBrowser(queue.shift(), mode, preset);
+  }));
+  clearInterval(timer);
+  const s = { finished: true, files }; renderJob(s); finishJob(s, items);
+}
+
+$('startSingle').onclick = () => {
+  const id = $('cid').value.trim();
+  if (!id) return alert('Missing Candidate ID');
+  runJob([{ id, screen_url: $('surl').value.trim() || null, webcam_url: $('wurl').value.trim() || null }]);
+};
+
+/* ── Bulk upload ── */
+let bulkRows = [];
+function parseCSV(text) {
+  const rows = []; let row = [], cur = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += c; }
+    else if (c === '"') q = true;
+    else if (c === ',') { row.push(cur); cur = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(cur); rows.push(row); row = []; cur = ''; }
+    else cur += c;
+  }
+  if (cur || row.length) { row.push(cur); rows.push(row); }
+  const head = rows.shift() || [];
+  return rows.filter((r) => r.some((v) => v.trim() !== '')).map((r) => Object.fromEntries(head.map((h, i) => [h, r[i] ?? ''])));
+}
+$('file').onchange = async (e) => {
+  const f = e.target.files[0]; if (!f) return;
+  $('bulkTools').classList.add('hidden');
+  try {
+    let data;
+    if (/\.csv$/i.test(f.name)) data = parseCSV((await f.text()).replace(/^﻿/, ''));
+    else { const wb = XLSX.read(await f.arrayBuffer()); data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' }); }
+    const cols = data.length ? Object.keys(data[0]) : [];
+    const find = (k) => cols.find((c) => String(c).toLowerCase().includes(k));
+    const idC = find('candidate_id'), sC = find('screen_record_url'), wC = find('webcam_record_url');
+    if (!idC) { $('bulkInfo').textContent = "Could not find 'candidate_id' column."; $('bulkInfo').className = 'msg err'; return; }
+    $('bulkInfo').textContent = `Found columns: ID(${idC}), Screen(${sC}), Webcam(${wC}) — ${data.length} rows`;
+    $('bulkInfo').className = 'msg ok';
+    bulkRows = data.filter((r) => String(r[idC]).trim()).map((r) => ({
+      on: true, id: String(r[idC]).trim(), s: sC ? String(r[sC]).trim() : '', w: wC ? String(r[wC]).trim() : '',
+    }));
+    renderBulk(); $('bulkTools').classList.remove('hidden');
+  } catch (err) { $('bulkInfo').textContent = 'Error reading file: ' + err.message; $('bulkInfo').className = 'msg err'; }
+};
+function renderBulk() {
+  $('bulkTable').innerHTML = '<tr><th>Process</th><th>Candidate ID</th><th>Screen URL</th><th>Webcam URL</th></tr>' +
+    bulkRows.map((r, i) => `<tr><td><input type="checkbox" data-i="${i}" ${r.on ? 'checked' : ''}></td><td>${esc(r.id)}</td><td title="${esc(r.s)}">${esc(r.s)}</td><td title="${esc(r.w)}">${esc(r.w)}</td></tr>`).join('');
+  $('bulkTable').querySelectorAll('input').forEach((c) => c.onchange = () => { bulkRows[c.dataset.i].on = c.checked; });
+}
+$('markAll').onclick = () => { bulkRows.forEach((r) => r.on = true); renderBulk(); };
+$('unmarkAll').onclick = () => { bulkRows.forEach((r) => r.on = false); renderBulk(); };
+$('startBulk').onclick = () => {
+  const sel = bulkRows.filter((r) => r.on);
+  if (!sel.length) return alert('No candidates selected.');
+  runJob(sel.map((r) => ({ id: r.id, screen_url: r.s || null, webcam_url: r.w || null })));
+};
+
+/* ── Reviewer ── */
+let cands = [], cur = null;
+const reviewedKey = () => 'reviewed:' + folder;
+const reviewed = () => { try { return new Set(JSON.parse(store.get(reviewedKey(), '[]'))); } catch { return new Set(); } };
+const saveReviewed = (s) => store.set(reviewedKey(), JSON.stringify([...s]));
+
+async function loadCandidates() {
+  if (!folder) { cands = []; renderSelect(); return; }
+  try {
+    if (useHelper()) cands = (await api('/api/candidates?folder=' + encodeURIComponent(folder))).candidates;
+    else {
+      const has = async (d, n) => { try { await d.getFileHandle(n); return true; } catch { return false; } };
+      cands = [];
+      for await (const [name, h] of dirHandle.entries())
+        if (h.kind === 'directory') cands.push({ name, screen: await has(h, name + '_screenrecord.mp4'), webcam: await has(h, name + '_webcam.mp4') });
+      cands.sort((a, b) => a.name.localeCompare(b.name));
+    }
+  } catch { cands = []; }
+  if (cur && !cands.find((c) => c.name === cur)) cur = null;
+  renderSelect();
+}
+function renderSelect() {
+  const rev = reviewed();
+  $('candSel').innerHTML = '<option value="">Select a candidate…</option>' +
+    cands.map((c) => `<option value="${esc(c.name)}" ${c.name === cur ? 'selected' : ''}>${rev.has(c.name) ? '✓  ' : ''}${esc(c.name)}</option>`).join('');
+  const i = cands.findIndex((c) => c.name === cur);
+  $('prev').disabled = i <= 0;
+  $('next').disabled = i < 0 || i >= cands.length - 1;
+  $('nextUnrev').disabled = !cands.some((c) => !rev.has(c.name));
+  $('markRev').classList.toggle('hidden', !cur);
+  $('markRev').textContent = cur && rev.has(cur) ? 'Unmark Reviewed' : '✓ Mark Reviewed';
+  $('markRev').classList.toggle('primary', !(cur && rev.has(cur)));
+}
+function select(name) { cur = name || null; renderSelect(); loadPlayer(); document.title = cur ? cur + ' | Reviewer' : 'Candidate Video Suite'; }
+$('candSel').onchange = (e) => select(e.target.value);
+$('prev').onclick = () => { const i = cands.findIndex((c) => c.name === cur); if (i > 0) select(cands[i - 1].name); };
+$('next').onclick = () => { const i = cands.findIndex((c) => c.name === cur); if (i >= 0 && i < cands.length - 1) select(cands[i + 1].name); };
+$('nextUnrev').onclick = () => {
+  const rev = reviewed(), un = cands.filter((c) => !rev.has(c.name));
+  if (!un.length) return;
+  select((un.find((c) => c.name > (cur || '')) || un[0]).name);
+};
+$('markRev').onclick = () => { const s = reviewed(); s.has(cur) ? s.delete(cur) : s.add(cur); saveReviewed(s); renderSelect(); loadPlayer(); };
+
+let v1, v2, maxDur = 0, seeking = false;
+const fmt = (s) => { if (!isFinite(s) || s < 0) s = 0; return [Math.floor(s / 3600), Math.floor(s % 3600 / 60), Math.floor(s % 60)].map((v) => String(v).padStart(2, '0')).join(':'); };
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+function stopPlayer() { if (v1) v1.pause(); if (v2) v2.pause(); }
+let blobUrls = [], playerToken = 0;
+async function loadPlayer() {
+  const token = ++playerToken;
+  stopPlayer(); v1 = v2 = null; maxDur = 0;
+  blobUrls.forEach((u) => URL.revokeObjectURL(u)); blobUrls = [];
+  const box = $('player');
+  if (!cur) { box.innerHTML = '<div class="empty">Select a candidate above to begin review.</div>'; return; }
+  const c = cands.find((x) => x.name === cur);
+  if (!c || !c.screen || !c.webcam) {
+    const miss = [!c?.screen && `${cur}_screenrecord.mp4 (screen record)`, !c?.webcam && `${cur}_webcam.mp4 (webcam)`].filter(Boolean);
+    box.innerHTML = `<div class="banner"><b>Missing files for ${esc(cur)}.</b> ${esc(miss.join(', '))}</div>`; return;
+  }
+  const name = cur;
+  const url = async (f) => {
+    if (useHelper()) return `${API}/video?folder=${encodeURIComponent(folder)}&path=${encodeURIComponent(name + '/' + f)}`;
+    const d = await dirHandle.getDirectoryHandle(name);
+    const u = URL.createObjectURL(await (await d.getFileHandle(f)).getFile());
+    blobUrls.push(u); return u;
+  };
+  let src1, src2;
+  try { [src1, src2] = await Promise.all([url(name + '_screenrecord.mp4'), url(name + '_webcam.mp4')]); }
+  catch (e) { box.innerHTML = `<div class="banner">Could not open videos: ${esc(e.message)}</div>`; return; }
+  if (token !== playerToken) return;
+  const isRev = reviewed().has(cur);
+  box.innerHTML = `
+  <div class="videos">
+    <div class="panel"><div class="vlabel"><span>Screen Record</span><span>${isRev ? '<span class="rev">✓ reviewed</span> ' : ''}<span id="dur1" class="mono">—</span></span></div>
+      <div class="vwrap"><video id="v1" preload="auto" playsinline src="${src1}"></video><div class="ended" id="ov1">⏹ Video ended</div></div>
+      <div class="vfoot"><button id="mute1">Mute</button><input type="range" id="vol1" min="0" max="1" step="0.05" value="1"><span id="vl1" class="mono">100%</span></div></div>
+    <div class="panel"><div class="vlabel"><span>Webcam Record</span><span id="dur2" class="mono">—</span></div>
+      <div class="vwrap"><video id="v2" preload="auto" playsinline src="${src2}"></video><div class="ended" id="ov2">⏹ Video ended</div></div>
+      <div class="vfoot"><button id="mute2">Mute</button><input type="range" id="vol2" min="0" max="1" step="0.05" value="1"><span id="vl2" class="mono">100%</span></div></div>
+  </div>
+  <div class="controls">
+    <div class="row"><button class="primary" id="play" style="min-width:76px">Play</button>
+      <input type="range" id="seek" min="0" max="100" value="0" step="0.01" style="flex:1">
+      <span id="time" class="mono" style="min-width:120px;text-align:right">00:00:00 / 00:00:00</span></div>
+    <div class="row"><button id="back5">−5s</button><button id="fwd5">+5s</button>
+      <select id="rate"><option value="0.5">0.5×</option><option value="1" selected>1.0×</option><option value="1.5">1.5×</option><option value="2">2.0×</option></select>
+      <span class="syncdot" id="sdot"></span><span id="slabel" class="mono">in sync</span>
+      <span class="grow"></span><span class="mono">Space · ← →</span></div>
+  </div>`;
+  v1 = $('v1'); v2 = $('v2');
+  const play = $('play'), seek = $('seek');
+  const setPlayLabel = (playing) => { play.textContent = playing ? 'Pause' : 'Play'; };
+
+  const onMeta = () => {
+    const d1 = isFinite(v1.duration) ? v1.duration : 0, d2 = isFinite(v2.duration) ? v2.duration : 0;
+    maxDur = Math.max(d1, d2); $('dur1').textContent = fmt(d1); $('dur2').textContent = fmt(d2);
+  };
+  v1.onloadedmetadata = v2.onloadedmetadata = onMeta;
+
+  const syncPlay = async () => {
+    v2.currentTime = clamp(v1.currentTime, 0, isFinite(v2.duration) ? v2.duration : v1.currentTime);
+    v1.playbackRate = v2.playbackRate = parseFloat($('rate').value);
+    await Promise.all([v1.play(), v2.play()]);
+  };
+  window.togglePlay = async () => {
+    if (!v1) return;
+    if (!v1.paused || !v2.paused) { v1.pause(); v2.pause(); setPlayLabel(false); return; }
+    if (v1.ended) { v1.currentTime = v2.ended ? 0 : v2.currentTime; $('ov1').classList.remove('on'); }
+    if (v2.ended) { v2.currentTime = v1.ended ? 0 : v1.currentTime; $('ov2').classList.remove('on'); }
+    try { await syncPlay(); setPlayLabel(true); } catch {}
+  };
+  play.onclick = window.togglePlay;
+
+  v1.ontimeupdate = () => {
+    if (seeking) return;
+    const drift = Math.abs(v1.currentTime - v2.currentTime);
+    if (drift > 0.15) {
+      $('sdot').classList.add('warn'); $('slabel').textContent = `drift ${drift.toFixed(2)}s`;
+      v2.currentTime = clamp(v1.currentTime, 0, isFinite(v2.duration) ? v2.duration : v1.currentTime);
+    } else { $('sdot').classList.remove('warn'); $('slabel').textContent = 'in sync'; }
+    if (maxDur > 0) seek.value = v1.currentTime / maxDur * 100;
+    $('time').textContent = fmt(v1.currentTime) + ' / ' + fmt(maxDur);
+  };
+
+  window.seekTo = async (t) => {
+    if (!v1) return;
+    const was = !v1.paused || !v2.paused; if (was) { v1.pause(); v2.pause(); }
+    seeking = true; const tg = clamp(t, 0, maxDur || t);
+    v1.currentTime = clamp(tg, 0, isFinite(v1.duration) ? v1.duration : tg);
+    v2.currentTime = clamp(tg, 0, isFinite(v2.duration) ? v2.duration : tg);
+    seeking = false; $('ov1').classList.remove('on'); $('ov2').classList.remove('on');
+    if (was) { try { await syncPlay(); } catch {} }
+  };
+  seek.oninput = () => window.seekTo(maxDur * seek.value / 100);
+  $('back5').onclick = () => window.seekTo(v1.currentTime - 5);
+  $('fwd5').onclick = () => window.seekTo(v1.currentTime + 5);
+
+  [['1', v1], ['2', v2]].forEach(([n, v]) => {
+    $('vol' + n).oninput = (e) => { v.volume = e.target.value; $('vl' + n).textContent = Math.round(e.target.value * 100) + '%'; };
+    $('mute' + n).onclick = (e) => { v.muted = !v.muted; e.target.textContent = v.muted ? 'Unmute' : 'Mute'; };
+  });
+  $('rate').onchange = () => { v1.playbackRate = v2.playbackRate = parseFloat($('rate').value); };
+
+  v1.onended = () => { $('ov1').classList.add('on'); if (v2.paused || v2.ended) setPlayLabel(false); };
+  v2.onended = () => { $('ov2').classList.add('on'); if (v1.paused || v1.ended) setPlayLabel(false); };
+}
+
+let skipTimer = null;
+document.addEventListener('keydown', (e) => {
+  if ($('rvView').classList.contains('hidden') || !v1) return;
+  if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName) && e.target.type !== 'range') return;
+  if (e.code === 'Space') { e.preventDefault(); window.togglePlay(); }
+  else if (e.code === 'ArrowRight' || e.code === 'ArrowLeft') {
+    e.preventDefault();
+    const off = e.code === 'ArrowRight' ? 5 : -5;
+    clearTimeout(skipTimer); skipTimer = setTimeout(() => window.seekTo(v1.currentTime + off), 150);
+  }
+});
+</script>
+</body>
+</html>
