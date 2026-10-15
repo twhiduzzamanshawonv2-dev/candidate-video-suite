@@ -229,6 +229,8 @@ function updateStatus(info) {
     : hasFS ? 'Browser mode' : 'Unsupported browser';
   $('setup').classList.toggle('hidden', ok);
   $('folderDl').readOnly = $('folderRv').readOnly = !connected;
+  const ph = connected ? 'Type or paste a folder path, or click Browse' : 'Click Browse to choose a folder (typing needs the local helper)';
+  $('folderDl').placeholder = $('folderRv').placeholder = ph;
 }
 let folder = '', helperInfo = null, wasmOk = null;
 function renderChecks() {
@@ -269,8 +271,14 @@ function setConnected(ok, info) {
   if (ok) $('helperBanner').classList.add('hidden');
   if (ok !== was) { setFolder(ok ? store.get('folder', '') : (dirHandle ? dirHandle.name : '')); cur = null; loadCandidates(); }
 }
+let pingFails = 0;
 async function checkHelper() {
-  try { setConnected(true, await api('/api/ping')); } catch { setConnected(false); }
+  try { pingFails = 0; setConnected(true, await api('/api/ping')); }
+  catch {
+    // one missed check (busy PC, slow start) must not flip modes and wipe the typed path
+    pingFails++;
+    if (pingFails >= 2 || !connected) setConnected(false);
+  }
 }
 function showHelperBanner() { if (!connected) $('helperBanner').classList.remove('hidden'); }
 function launchHelper() {
@@ -306,14 +314,18 @@ $('navDl').onclick = () => showView('dl');
 $('navRv').onclick = () => showView('rv');
 
 /* ── Shared folder ── */
-function setFolder(p) {
+// `from` = the field being typed in; it is left untouched so the cursor doesn't jump
+function setFolder(p, from) {
   folder = p;
   if (useHelper()) store.set('folder', p);
   renderChecks();
-  $('folderDl').value = p; $('folderRv').value = p;
+  if (from !== 'dl') $('folderDl').value = p;
+  if (from !== 'rv') $('folderRv').value = p;
 }
-$('folderDl').oninput = (e) => { if (useHelper()) setFolder(e.target.value.trim()); };
-$('folderRv').onchange = (e) => { if (useHelper()) { setFolder(e.target.value.trim()); loadCandidates(); } };
+$('folderDl').oninput = (e) => { if (useHelper()) setFolder(e.target.value.trim(), 'dl'); };
+$('folderRv').oninput = (e) => { if (useHelper()) setFolder(e.target.value.trim(), 'rv'); };
+$('folderRv').onchange = () => { if (useHelper()) loadCandidates(); };
+$('folderRv').onkeydown = (e) => { if (e.key === 'Enter' && useHelper()) loadCandidates(); };
 async function browse(after) {
   try {
     if (useHelper()) {
