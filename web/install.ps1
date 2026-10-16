@@ -11,12 +11,33 @@ $FfmpegUrls = @(
 )
 
 function Step($m) { Write-Host "[+] $m" }
+
+# Delete a file or folder; never throws. Windows PowerShell's Remove-Item -Recurse can fail on 8.3 short
+# paths (C:\Users\MYPC~1\...), and a cleanup problem must never turn a good install into a failed one.
+function Remove-Safe($path) {
+    if (-not $path) { return }
+    try {
+        if ([IO.Directory]::Exists($path)) { [IO.Directory]::Delete($path, $true); return }
+        if ([IO.File]::Exists($path)) { [IO.File]::Delete($path); return }
+    } catch {}
+    try { Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue } catch {}
+}
+
+# Long form of a folder path (expands 8.3 names like MYPC~1); falls back to the path as given.
+function Get-LongPath($path) {
+    try {
+        if (-not ('CvPath' -as [type])) {
+            Add-Type -TypeDefinition 'using System; using System.Text; using System.Runtime.InteropServices; public static class CvPath { [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern uint GetLongPathName(string s, StringBuilder l, uint n); public static string Long(string p) { var sb = new StringBuilder(1024); uint r = GetLongPathName(p, sb, (uint)sb.Capacity); return (r > 0 && r < sb.Capacity) ? sb.ToString() : p; } }'
+        }
+        return [CvPath]::Long($path)
+    } catch { return $path }
+}
 function Fail($m) { Write-Host "[X] $m" -ForegroundColor Red; throw $m }
 
 # Invoke-WebRequest can stall on big files; curl.exe (Windows 10 1803+) retries, resumes and aborts stalled transfers
 function Get-File($url, $out) {
     # curl -C - would append to a leftover file from an earlier run and corrupt it
-    if (Test-Path $out) { Remove-Item $out -Force }
+    Remove-Safe $out
     $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
     if ($curl) {
         & $curl.Source -L --fail --silent --show-error --retry 5 --retry-delay 2 --connect-timeout 20 --speed-time 30 --speed-limit 5000 -C - -o $out $url
@@ -39,7 +60,8 @@ if (-not [Environment]::Is64BitOperatingSystem) { Fail 'This helper needs 64-bit
 
 $dir = Join-Path $env:LOCALAPPDATA 'CandidateHelper'
 New-Item -ItemType Directory -Force $dir | Out-Null
-$tmp = Join-Path $env:TEMP ('cvh_' + [guid]::NewGuid().ToString('N'))
+$tmpRoot = Get-LongPath $env:TEMP
+$tmp = Join-Path $tmpRoot ('cvh_' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force $tmp | Out-Null
 
 # 1. Get the helper script FIRST (from the project folder if run from there, else from the site),
@@ -75,7 +97,7 @@ if (Test-Path $py) {
     if ($LASTEXITCODE -eq 0) { $needLibs = $false }
 }
 if ($needLibs) {
-    if (Test-Path $pyDir) { Remove-Item $pyDir -Recurse -Force }
+    Remove-Safe $pyDir
     Step 'Downloading Python 3.12 (about 10 MB)...'
     Download $PythonUrl (Join-Path $tmp 'python.zip')
     Expand-Archive -Path (Join-Path $tmp 'python.zip') -DestinationPath $pyDir -Force
@@ -105,7 +127,7 @@ if ((Test-Path (Join-Path $ffDir 'ffmpeg.exe')) -or (Get-Command ffmpeg -ErrorAc
         try {
             Step "Downloading FFmpeg (about 80 MB, please wait)..."
             $zip = Join-Path $tmp 'ffmpeg.zip'
-            if (Test-Path $zip) { Remove-Item $zip -Force }
+            Remove-Safe $zip
             Get-File $u $zip
             $ex = Join-Path $tmp 'ffmpeg'
             Expand-Archive -Path $zip -DestinationPath $ex -Force
@@ -125,7 +147,7 @@ if ((Test-Path (Join-Path $ffDir 'ffmpeg.exe')) -or (Get-Command ffmpeg -ErrorAc
 #    directly (no Windows Script Host, which some PCs have disabled).
 $pyw = Join-Path $pyDir 'pythonw.exe'
 $cmd = '"' + $pyw + '" "' + $helper + '"'
-Remove-Item (Join-Path $dir 'launcher.vbs') -Force -ErrorAction SilentlyContinue
+Remove-Safe (Join-Path $dir 'launcher.vbs')
 
 Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'CandidateHelper' -Value $cmd
 $proto = 'HKCU:\Software\Classes\cvhelper'
@@ -143,7 +165,7 @@ for ($i = 0; $i -lt 60 -and -not $up; $i++) {
     Start-Sleep -Milliseconds 750
     try { $r = Invoke-RestMethod -Uri 'http://127.0.0.1:8765/api/ping' -TimeoutSec 2; if ($r.ok) { $up = $true } } catch {}
 }
-Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Safe $tmp
 
 Write-Host ''
 if ($up) {
@@ -168,7 +190,7 @@ if ($up) {
     if (Test-Path $log) { Write-Host '    --- helper.log ---'; Get-Content $log -Tail 25 | ForEach-Object { Write-Host "    $_" } }
     else {
         Write-Host '    --- trying to run the helper in this window to show the error ---'
-        $out = Join-Path $env:TEMP 'cvh_run.txt'
+        $out = Join-Path $tmpRoot 'cvh_run.txt'
         $p = Start-Process -FilePath $py -ArgumentList ('"' + $helper + '"') -RedirectStandardError $out -NoNewWindow -PassThru
         Start-Sleep -Seconds 8
         if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force; Write-Host '    (it started fine here - something blocks the hidden start; send this to the developer)' }
