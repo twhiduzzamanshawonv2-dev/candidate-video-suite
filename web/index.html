@@ -516,8 +516,12 @@ $('copyCmdMac').onclick = async () => {
   try { await navigator.clipboard.writeText(MAC_CMD()); $('copyMsgMac').textContent = ' Copied – open Terminal, paste, Enter.'; }
   catch { $('copyMsgMac').textContent = ' ' + MAC_CMD(); }
 };
+let launchHinted = false;
 function launchHelper() {
-  // Works after the one-time setup registered the cvhelper:// link
+  // Works after the one-time setup registered the cvhelper:// link (Windows only; on a Mac the
+  // LaunchAgent keeps the helper running, so there is nothing to launch)
+  if (IS_MAC) return;
+  if (!launchHinted) { launchHinted = true; toast('Chrome will ask “Open Python?” – click Open Python (tick “Always allow” so it does not ask again).'); }
   const f = document.createElement('iframe'); f.style.display = 'none'; f.src = 'cvhelper://start';
   document.body.appendChild(f); setTimeout(() => f.remove(), 3000);
 }
