@@ -634,9 +634,17 @@ function raiseFolderWindow() {
   raising = true;
   post('/api/browse/raise').catch(() => {}).finally(() => { raising = false; });
 }
-async function browse(after, title) {
+async function browse(after, title, reviewer) {
   if (browseStarting) return;
   if (browsePending) { raiseFolderWindow(); return; }
+  // Reviewing needs no helper: if it is not already running, use the browser's own folder picker
+  // (no install prompt, no "Open Python?" box).
+  if (reviewer && !useHelper() && !browsePending) {
+    if (!hasFS) return alert('Please use Chrome or Edge on desktop.');
+    try { dirHandle = await showDirectoryPicker({ mode: 'read' }); setFolder(dirHandle.name); if (after) after(); }
+    catch (e) { if (e.name !== 'AbortError') alert('Could not open folder: ' + e.message); }
+    return;
+  }
   if (!useHelper() && !helperSeen()) {
     await checkHelper(true, 4000);                  // quick look in case it is already running
     if (!connected) { guideToInstall(INSTALL_FIRST); return; }
@@ -678,7 +686,7 @@ async function browse(after, title) {
   finally { browseStarting = false; paintBrowse(); }
 }
 $('browseDl').onclick = () => browse(undefined, 'Select the download folder');
-$('browseRv').onclick = () => browse(loadCandidates, 'Select the folder that contains the candidate folders');
+$('browseRv').onclick = () => browse(loadCandidates, 'Select the folder that contains the candidate folders', true);
 $('reload').onclick = loadCandidates;
 
 /* ── Settings ── */
