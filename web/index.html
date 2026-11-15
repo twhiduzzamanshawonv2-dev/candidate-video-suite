@@ -1093,15 +1093,31 @@ const reviewedKey = () => 'reviewed:' + folder;
 const reviewed = () => { try { return new Set(JSON.parse(store.get(reviewedKey(), '[]'))); } catch { return new Set(); } };
 const saveReviewed = (s) => store.set(reviewedKey(), JSON.stringify([...s]));
 
+// Which file is the screen recording / the webcam recording? Exact name first (<id>_screenrecord.mp4),
+// otherwise any video whose name says screen / webcam; .mp4 is preferred over .webm.
+const VIDEO_EXT = ['.mp4', '.webm', '.mov', '.m4v'];
+function pickVideos(id, names) {
+  const vids = names.filter((n) => VIDEO_EXT.includes(n.slice(n.lastIndexOf('.')).toLowerCase()));
+  const rank = (n) => VIDEO_EXT.indexOf(n.slice(n.lastIndexOf('.')).toLowerCase());
+  const find = (kind, re) => {
+    const exact = vids.filter((n) => n.toLowerCase().startsWith((id + '_' + kind).toLowerCase()));
+    const loose = vids.filter((n) => re.test(n));
+    return ((exact.length ? exact : loose).sort((a, b) => rank(a) - rank(b))[0]) || null;
+  };
+  return { screen: find('screenrecord', /screen/i), webcam: find('webcam', /web ?cam|camera/i) };
+}
 async function loadCandidates() {
   if (!folder) { cands = []; renderSelect(); return; }
   try {
     if (useHelper()) cands = (await api('/api/candidates?folder=' + encodeURIComponent(folder))).candidates;
     else {
-      const has = async (d, n) => { try { await d.getFileHandle(n); return true; } catch { return false; } };
       cands = [];
-      for await (const [name, h] of dirHandle.entries())
-        if (h.kind === 'directory') cands.push({ name, screen: await has(h, name + '_screenrecord.mp4'), webcam: await has(h, name + '_webcam.mp4') });
+      for await (const [name, h] of dirHandle.entries()) {
+        if (h.kind !== 'directory') continue;
+        const names = [];
+        for await (const [fn, fh] of h.entries()) if (fh.kind === 'file') names.push(fn);
+        cands.push({ name, ...pickVideos(name, names), files: names });
+      }
       cands.sort((a, b) => a.name.localeCompare(b.name));
     }
   } catch { cands = []; }
@@ -1146,7 +1162,8 @@ async function loadPlayer() {
   const c = cands.find((x) => x.name === cur);
   if (!c || !c.screen || !c.webcam) {
     const miss = [!c?.screen && `${cur}_screenrecord.mp4 (screen record)`, !c?.webcam && `${cur}_webcam.mp4 (webcam)`].filter(Boolean);
-    box.innerHTML = `<div class="banner"><b>Missing files for ${esc(cur)}.</b> ${esc(miss.join(', '))}</div>`; return;
+    const found = c?.files ? (c.files.length ? ' Files in the ' + cur + ' folder: ' + c.files.join(', ') : ' The ' + cur + ' folder is empty.') : '';
+    box.innerHTML = `<div class="banner"><b>Missing files for ${esc(cur)}.</b> ${esc(miss.join(', '))}.${esc(found)}<br>Pick the folder that <i>contains</i> the candidate folders (for example Downloads\converted_files), not a candidate folder itself.</div>`; return;
   }
   const name = cur;
   const url = async (f) => {
@@ -1156,7 +1173,7 @@ async function loadPlayer() {
     blobUrls.push(u); return u;
   };
   let src1, src2;
-  try { [src1, src2] = await Promise.all([url(name + '_screenrecord.mp4'), url(name + '_webcam.mp4')]); }
+  try { [src1, src2] = await Promise.all([url(c.screen === true ? name + '_screenrecord.mp4' : c.screen), url(c.webcam === true ? name + '_webcam.mp4' : c.webcam)]); }
   catch (e) { box.innerHTML = `<div class="banner">Could not open videos: ${esc(e.message)}</div>`; return; }
   if (token !== playerToken) return;
   const isRev = reviewed().has(cur);

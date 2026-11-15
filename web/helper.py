@@ -287,7 +287,7 @@ def ffmpeg_version():
 def ping():
     return {
         "ok": True,
-        "version": "1.8",
+        "version": "1.9",
         "python": sys.version.split()[0],
         "platform": "windows" if IS_WIN else "mac" if IS_MAC else "linux",
         "ffmpeg": FFMPEG is not None,
@@ -611,6 +611,23 @@ def job_status(job_id: str):
 
 # ── Reviewer support ───────────────────────────────────────────────────────────
 
+VIDEO_EXT = (".mp4", ".webm", ".mov", ".m4v")
+
+
+def pick_videos(cid, names):
+    """Exact <id>_screenrecord.* / <id>_webcam.* first, else any video named like screen / webcam (.mp4 preferred)."""
+    vids = [n for n in names if os.path.splitext(n)[1].lower() in VIDEO_EXT]
+    rank = lambda n: VIDEO_EXT.index(os.path.splitext(n)[1].lower())
+
+    def find(kind, rx):
+        exact = [n for n in vids if n.lower().startswith(f"{cid}_{kind}".lower())]
+        loose = [n for n in vids if re.search(rx, n, re.I)]
+        pool = sorted(exact or loose, key=rank)
+        return pool[0] if pool else None
+
+    return find("screenrecord", r"screen"), find("webcam", r"web ?cam|camera")
+
+
 @app.get("/api/candidates")
 def candidates(folder: str):
     if not os.path.isdir(folder):
@@ -619,11 +636,9 @@ def candidates(folder: str):
     for d in sorted(os.listdir(folder)):
         p = os.path.join(folder, d)
         if os.path.isdir(p):
-            result.append({
-                "name": d,
-                "screen": os.path.exists(os.path.join(p, f"{d}_screenrecord.mp4")),
-                "webcam": os.path.exists(os.path.join(p, f"{d}_webcam.mp4")),
-            })
+            names = [n for n in os.listdir(p) if os.path.isfile(os.path.join(p, n))]
+            screen, webcam = pick_videos(d, names)
+            result.append({"name": d, "screen": screen, "webcam": webcam, "files": names})
     return {"candidates": result}
 
 
