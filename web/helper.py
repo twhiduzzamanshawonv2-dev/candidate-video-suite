@@ -17,6 +17,10 @@ import time
 import uuid
 import glob
 from concurrent.futures import ThreadPoolExecutor
+from typing import List, Optional
+
+IS_WIN = sys.platform == "win32"
+IS_MAC = sys.platform == "darwin"
 
 # Started with pythonw (no console): stdout/stderr are None, which crashes uvicorn and hides
 # every error. Send them to helper.log next to this file so problems can be diagnosed.
@@ -42,20 +46,27 @@ NOWIN = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # no console flash when star
 
 
 def find_exe(name):
-    """Bundled copy (installed by setup), then PATH, then winget's folders."""
+    """Bundled copy (installed by setup), then PATH, then the usual install folders."""
     here = os.path.dirname(os.path.abspath(__file__))
-    bundled = os.path.join(here, "ffmpeg", name + ".exe")
+    bundled = os.path.join(here, "ffmpeg", name + (".exe" if IS_WIN else ""))
     if os.path.isfile(bundled):
         return bundled
     found = shutil.which(name)
     if found:
         return found
-    local = os.environ.get("LOCALAPPDATA", "")
-    link = os.path.join(local, "Microsoft", "WinGet", "Links", name + ".exe")
-    if os.path.isfile(link):
-        return link
-    hits = glob.glob(os.path.join(local, "Microsoft", "WinGet", "Packages", "*FFmpeg*", "**", "bin", name + ".exe"), recursive=True)
-    return hits[0] if hits else None
+    if IS_WIN:
+        local = os.environ.get("LOCALAPPDATA", "")
+        link = os.path.join(local, "Microsoft", "WinGet", "Links", name + ".exe")
+        if os.path.isfile(link):
+            return link
+        hits = glob.glob(os.path.join(local, "Microsoft", "WinGet", "Packages", "*FFmpeg*", "**", "bin", name + ".exe"), recursive=True)
+        return hits[0] if hits else None
+    # A login-started helper has a minimal PATH that misses Homebrew
+    for d in ("/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"):
+        p = os.path.join(d, name)
+        if os.path.isfile(p) and os.access(p, os.X_OK):
+            return p
+    return None
 
 
 FFMPEG = find_exe("ffmpeg")
@@ -116,13 +127,28 @@ def _seconds(text):
     return best
 
 
+def _duration_from_ffmpeg(path):
+    """No ffprobe available: read 'Duration: hh:mm:ss.xx' from ffmpeg's own header dump (0 if unknown)."""
+    try:
+        out = subprocess.run([FFMPEG or "ffmpeg", "-hide_banner", "-i", path],
+                             capture_output=True, text=True, timeout=60, creationflags=NOWIN)
+        m = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", out.stderr)
+        if m:
+            return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
+    except Exception:
+        pass
+    return 0
+
+
 def get_video_duration(path):
     """Length in seconds, or 0 if it can't be worked out.
 
     Videos recorded in a browser (WebM) usually store no length at all, so ffprobe says N/A and a
     percentage can't be shown. In that case read the timestamps of the video packets (no decoding, fast).
     """
-    probe = FFPROBE or "ffprobe"
+    if not FFPROBE:
+        return _duration_from_ffmpeg(path)
+    probe = FFPROBE
     try:
         for entry in ("format=duration", "stream=duration"):
             out = subprocess.run(
@@ -231,8 +257,8 @@ def run_job(job):
 
 class JobItem(BaseModel):
     id: str
-    screen_url: str | None = None
-    webcam_url: str | None = None
+    screen_url: Optional[str] = None
+    webcam_url: Optional[str] = None
 
 
 class JobRequest(BaseModel):
@@ -240,7 +266,7 @@ class JobRequest(BaseModel):
     mode: str = "convert"  # convert | original | rename
     preset: str = "ultrafast"
     workers: int = 4
-    items: list[JobItem]
+    items: List[JobItem]
 
 
 _ffmpeg_version = None
@@ -261,8 +287,9 @@ def ffmpeg_version():
 def ping():
     return {
         "ok": True,
-        "version": "1.7",
+        "version": "1.8",
         "python": sys.version.split()[0],
+        "platform": "windows" if IS_WIN else "mac" if IS_MAC else "linux",
         "ffmpeg": FFMPEG is not None,
         "ffmpeg_version": ffmpeg_version() or "",
         "ffprobe": FFPROBE is not None,
@@ -443,6 +470,47 @@ public static class CvRaise {
 '''
 
 
+_MAC_PICK = '''on run argv
+    set promptText to item 1 of argv
+    set startPath to item 2 of argv
+    tell application "System Events"
+        activate
+        try
+            if startPath is "" then
+                set f to choose folder with prompt promptText
+            else
+                set f to choose folder with prompt promptText default location (POSIX file startPath)
+            end if
+        on error
+            return ""
+        end try
+    end tell
+    return POSIX path of f
+end run'''
+
+
+def _mac_pick(title, start):
+    proc = subprocess.Popen(["osascript", "-e", _MAC_PICK, title, start],
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    _browse_state["proc"] = proc
+    out, _ = proc.communicate()
+    path = out.strip()
+    return path.rstrip("/") if len(path) > 1 else path
+
+
+def _mac_raise():
+    subprocess.run(["osascript", "-e", 'tell application "System Events" to activate'],
+                   capture_output=True, timeout=15)
+
+
+def _raise_picker(proc):
+    if IS_MAC:
+        _mac_raise()
+    elif IS_WIN:
+        subprocess.run(_powershell(_FRONT_SCRIPT.replace("__PID__", str(proc.pid))),
+                       capture_output=True, timeout=15, creationflags=NOWIN)
+
+
 def _powershell(script, **kw):
     encoded = base64.b64encode(script.encode("utf-16-le")).decode()
     return ["powershell", "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-EncodedCommand", encoded]
@@ -454,7 +522,7 @@ class BrowseRequest(BaseModel):
 
 
 @app.post("/api/browse")
-def browse(req: BrowseRequest | None = None):
+def browse(req: Optional[BrowseRequest] = None):
     start = req.start.strip() if req and req.start else ""
     if start and not os.path.isdir(start):
         start = ""
@@ -464,14 +532,18 @@ def browse(req: BrowseRequest | None = None):
         proc = _browse_state["proc"]
         if proc is not None and proc.poll() is None:
             try:
-                subprocess.run(_powershell(_FRONT_SCRIPT.replace("__PID__", str(proc.pid))),
-                               capture_output=True, timeout=15, creationflags=NOWIN)
+                _raise_picker(proc)
             except Exception:
                 pass
         with _browse_lock:
             pass
         return {"path": _browse_state["path"]}
     try:
+        if IS_MAC:
+            _browse_state["path"] = _mac_pick(title, start)
+            return {"path": _browse_state["path"]}
+        if not IS_WIN:
+            raise HTTPException(501, "Folder window is only available on Windows and macOS - type the folder path instead")
         script = _DIALOG_SCRIPT.replace("__TITLE__", _ps_str(title)).replace("__START__", _ps_str(start))
         proc = subprocess.Popen(_powershell(script), stdout=subprocess.PIPE,
                                 text=True, creationflags=NOWIN)
@@ -491,8 +563,7 @@ def browse_raise():
     if proc is None or proc.poll() is not None:
         return {"raised": False}
     try:
-        subprocess.run(_powershell(_FRONT_SCRIPT.replace("__PID__", str(proc.pid))),
-                       capture_output=True, timeout=15, creationflags=NOWIN)
+        _raise_picker(proc)
     except Exception:
         return {"raised": False}
     return {"raised": True}

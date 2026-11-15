@@ -230,7 +230,12 @@
     <div id="scDetails" class="sc-details hidden"><div id="checkList"></div></div>
     <div id="checkSetup" class="sc-setup hidden">
       <div class="sc-setup-title">Install the helper <span class="mono">one time, about 2 minutes</span></div>
-      <div class="sc-setup-actions">
+      <div id="setupMac" class="sc-setup-actions hidden">
+        <button id="copyCmdMac" class="ghost primary">Copy setup command</button>
+        <span id="copyMsgMac" class="mono"></span>
+      </div>
+      <div id="setupMacNote" class="sc-setup-note hidden">Open <b>Terminal</b> (press Cmd+Space, type Terminal, Enter), paste with Cmd+V, press Enter. Python and FFmpeg are set up for you (no admin password, no Homebrew). When it says Done, come back and click Re-check.</div>
+      <div id="setupWin" class="sc-setup-actions">
         <a class="btnlink primary" href="Setup.bat" download>
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M5 21h14"/></svg>
           Download Setup.bat
@@ -239,7 +244,7 @@
         <button id="copyCmd" class="ghost">Copy command for PowerShell</button>
         <span id="copyMsg" class="mono"></span>
       </div>
-      <div class="sc-setup-note">Python and FFmpeg are downloaded for you (no admin rights, no winget). When it says Done, click Re-check.</div>
+      <div id="setupWinNote" class="sc-setup-note">Python and FFmpeg are downloaded for you (no admin rights, no winget). When it says Done, click Re-check.</div>
       <div class="sc-setup-note sc-perm"><b>Chrome may ask for permission</b> to connect to apps on this computer. Click <b>Allow</b> (it only lets this page talk to the helper on your own PC).
         If you clicked Block by mistake: click the settings icon left of the address, choose <b>Site settings</b>, set <b>Local network access</b> to Allow, then press Re-check.</div>
     </div>
@@ -249,7 +254,8 @@
     <b>These links can only be downloaded by the local helper.</b>
     The video servers block downloads from web pages, so the helper downloads straight to your PC (nothing goes through Vercel).
     <div style="margin-top:8px">
-      First time? <a href="Setup.bat" download>Download Setup.bat</a> and double-click it (downloads Python and FFmpeg too, no admin needed).
+      First time? <span class="onlyWin"><a href="Setup.bat" download>Download Setup.bat</a> and double-click it (downloads Python and FFmpeg too, no admin needed).</span>
+      <span class="onlyMac hidden">Use <b>Copy setup command</b> in the System check at the top and paste it into Terminal.</span>
       It starts by itself at every login after that.
       <button id="helperRetry" style="margin-left:8px">Retry connection</button>
       <span id="helperRetryMsg" class="mono" style="margin-left:8px"></span>
@@ -500,6 +506,16 @@ async function checkHelper(force, ms) {
   }
 }
 function showHelperBanner() { if (!connected) $('helperBanner').classList.remove('hidden'); }
+const IS_MAC = /Mac/i.test(navigator.platform || '') || /Macintosh/.test(navigator.userAgent || '');
+const MAC_CMD = () => `curl -fsSL ${location.origin}/install.sh | bash`;
+document.querySelectorAll('.onlyWin').forEach((e) => e.classList.toggle('hidden', IS_MAC));
+document.querySelectorAll('.onlyMac').forEach((e) => e.classList.toggle('hidden', !IS_MAC));
+['setupWin', 'setupWinNote'].forEach((id) => $(id).classList.toggle('hidden', IS_MAC));
+['setupMac', 'setupMacNote'].forEach((id) => $(id).classList.toggle('hidden', !IS_MAC));
+$('copyCmdMac').onclick = async () => {
+  try { await navigator.clipboard.writeText(MAC_CMD()); $('copyMsgMac').textContent = ' Copied – open Terminal, paste, Enter.'; }
+  catch { $('copyMsgMac').textContent = ' ' + MAC_CMD(); }
+};
 function launchHelper() {
   // Works after the one-time setup registered the cvhelper:// link
   const f = document.createElement('iframe'); f.style.display = 'none'; f.src = 'cvhelper://start';
@@ -509,7 +525,7 @@ $('helperRetry').onclick = async () => {
   $('helperRetryMsg').textContent = 'Checking…';
   await checkHelper();
   if (!connected) { launchHelper(); await new Promise((r) => setTimeout(r, 3000)); await checkHelper(); }
-  $('helperRetryMsg').textContent = connected ? '' : 'Not found – run Setup.bat first, then retry.';
+  $('helperRetryMsg').textContent = connected ? '' : (IS_MAC ? 'Not found – run the setup command in Terminal first, then retry.' : 'Not found – run Setup.bat first, then retry.');
 };
 $('copyCmd').onclick = async () => {
   const cmd = `[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; irm ${location.origin}/install.ps1 | iex`;
@@ -605,7 +621,7 @@ function guideToInstall(msg) {
   card.classList.remove('nudge'); void card.offsetWidth; card.classList.add('nudge');
   toast(msg);
 }
-const INSTALL_FIRST = 'First step: install the helper (one time, about 2 minutes). Click “Download Setup.bat” above and open it, then press Re-check. Already installed? Click Allow if Chrome asks for permission, then press Re-check.';
+const INSTALL_FIRST = 'First step: install the helper (one time, about 2 minutes). ' + (IS_MAC ? 'Click “Copy setup command” above, paste it into Terminal and press Enter, then press Re-check.' : 'Click “Download Setup.bat” above and open it, then press Re-check.') + ' Already installed? Click Allow if Chrome asks for permission, then press Re-check.';
 let raising = false;
 function raiseFolderWindow() {
   // One quick request at a time: piling up long-waiting requests fills Chrome's 6-connection limit,
@@ -640,7 +656,7 @@ async function browse(after, title) {
         'Old helpers can open extra folder windows. Run the setup command again (see System check at the top), then click Re-check.');
     }
     if (useHelper() || browsePending) {
-      // While the Windows folder window is open, extra clicks just bring it to the front
+      // While the folder window is open, extra clicks just bring it to the front
       // (the helper never opens a second one) - and never fall back to Chrome's picker.
       browsePending++; paintBrowse();
       let r;
@@ -648,7 +664,7 @@ async function browse(after, title) {
       if (r.path) { setFolder(r.path); if (after) after(); }
     } else {
       if (!hasFS) return alert('Please use Chrome or Edge on desktop.');
-      const msg = ["The local helper isn't running, so the Windows folder window can't be used.", '',
+      const msg = ["The local helper isn't running, so the folder window can't be used.", '',
         "Use the browser's own folder picker instead? (Downloads from most video links will be blocked in this mode.)"].join(String.fromCharCode(10));
       if (!confirm(msg)) return;
       dirHandle = await showDirectoryPicker({ mode: 'readwrite' });
