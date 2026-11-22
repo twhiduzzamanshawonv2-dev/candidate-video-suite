@@ -493,25 +493,28 @@ const useHelper = () => connected;
 const helperSeen = () => store.get('helperSeen', '') === '1';   // has this browser ever talked to the helper?
 
 function updateStatus() {
-  $('dot').classList.toggle('on', connected);
-  $('dot').classList.toggle('warn', !connected && hasFS);
-  $('status').textContent = connected ? 'Local helper connected'
-    : !firstCheckDone ? 'Checking helper…'
-    : !hasFS ? 'Unsupported browser'
-    : helperSeen() ? 'Helper not running' : 'Helper not installed';
+  $('dot').classList.toggle('on', connected || hasFS);
+  $('dot').classList.remove('warn');
+  $('status').textContent = connected ? 'Local helper connected' : hasFS ? 'Ready' : 'Unsupported browser';
   $('setup').classList.toggle('hidden', connected || hasFS);
-  $('helperHint').classList.toggle('hidden', connected || !firstCheckDone);
+  $('helperHint').classList.add('hidden');     // nothing to install: judging runs in the browser
   $('folderRv').readOnly = !connected;
-  $('folderRv').placeholder = connected ? 'Type or paste a folder path, or click Browse' : 'Click Browse to choose a folder (typing needs the local helper)';
+  $('folderRv').placeholder = connected ? 'Type or paste a folder path, or click Browse' : 'Click Browse to choose the folder with the candidate videos';
 }
 function setConnected(ok, info) {
   const was = connected; connected = ok; helperInfo = ok ? info : null;
   if (ok) store.set('helperSeen', '1');
   updateStatus();
-  if (ok !== was) { setFolder(ok ? store.get('folder', '') : (dirHandle ? dirHandle.name : '')); cur = null; loadCandidates(); }
+  if (ok !== was) {
+    setFolder(ok ? store.get('folder', '') : (dirHandle ? dirHandle.name : '')); cur = null; loadCandidates();
+    if (window.rvReboot) window.rvReboot();
+  }
 }
 let pingFails = 0;
 async function checkHelper() {
+  // The helper is optional. Only look for it if this browser has used it before (or ?helper=1), so new
+  // users never see Chrome's "access devices on your local network" prompt.
+  if (!helperSeen() && !/[?&]helper=1\b/.test(location.search)) { firstCheckDone = true; updateStatus(); return; }
   try {
     const signal = AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined;
     const info = await api('/api/ping', { signal });
@@ -841,8 +844,261 @@ document.addEventListener('keydown', (e) => {
     timer: null, dirty: false, booted: false, reportOpen: false, prevKeys: null, adding: false,
   };
   const verOk = (v) => { const [a, b] = String(v || '0').split('.').map(Number); return a > 1 || (a === 1 && b >= 10); };
-  const ready = () => useHelper() && helperInfo && verOk(helperInfo.version);
-  const outdated = () => useHelper() && helperInfo && !verOk(helperInfo.version);
+  const viaHelper = () => useHelper() && helperInfo && verOk(helperInfo.version);
+  const ready = () => true;          // judging always works: through the helper if present, else in the browser
+  const outdated = () => false;
+
+  /* ---- browser backend: used when no helper is running (nothing to install) ----
+     Judgements are kept in this browser and sent to the Google Sheet directly; Excel is built in the page. */
+  // An admin can bake the team's Google Sheet link in here so nobody has to paste it:
+  const DEFAULT_SHEET = '';
+  const SHEET_RE = /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec/;
+  class ScriptErr extends Error {}
+  const jget = (k, d) => { try { const v = JSON.parse(store.get(k, 'null')); return v === null ? d : v; } catch { return d; } };
+  const jset = (k, v) => store.set(k, JSON.stringify(v));
+  const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const nowS = () => { const d = new Date(), p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; };
+  const cleanExam = (name) => {
+    name = String(name || '').replace(/\s+/g, ' ').trim();
+    if (!name || name.length > 80 || /[\\/:*?"<>|\[\]]/.test(name)) throw new Error('Exam name is empty, too long, or contains one of these characters: \\ / : * ? " < > | [ ]');
+    return name;
+  };
+  const B = {
+    st: { last_ok: null, last_error: null, online: null }, flushing: false, timer: null,
+    cfg() { return jget('rv:cfg', {}); },
+    saveCfg(c) { jset('rv:cfg', c); },
+    sheet() {
+      const link = this.cfg().sheet || '';
+      if (!SHEET_RE.test(link)) return { url: null, key: '' };
+      let key = ''; try { key = new URL(link).searchParams.get('key') || ''; } catch {}
+      return { url: link.match(SHEET_RE)[0], key };
+    },
+    queue() { return jget('rv:queue', []); },
+    async call(payload, ms) {
+      const { url, key } = this.sheet();
+      if (!url) throw new ScriptErr('Google Sheet is not connected');
+      const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), ms || 45000);
+      let r;
+      try { r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ ...payload, key }), signal: ctl.signal }); }
+      finally { clearTimeout(t); }
+      let d; try { d = await r.json(); } catch { throw new ScriptErr("The Google Sheet link did not answer correctly. Check that the web app is deployed with access for 'Anyone'."); }
+      if (!d.ok) throw new ScriptErr(d.error || 'The Google Sheet refused the request');
+      return d;
+    },
+    enqueue(item) {
+      if (!this.sheet().url) return;
+      item.id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      let q = this.queue();
+      if (item.action === 'save' || item.action === 'clear') q = q.filter((x) => !((x.action === 'save' || x.action === 'clear') && x.exam === item.exam && x.row.candidate === item.row.candidate));
+      q.push(item); jset('rv:queue', q);
+      this.flush();
+    },
+    async flush() {
+      if (this.flushing || !this.sheet().url) return;
+      this.flushing = true;
+      try {
+        for (;;) {
+          const q = this.queue(); if (!q.length) break;
+          const item = q[0], { id, ...payload } = item;
+          try { await this.call(payload); }
+          catch (e) {
+            if (e instanceof ScriptErr) {
+              this.st.last_error = e.message; this.st.online = true;
+              if (e.message.startsWith('Wrong key')) break;
+              const failed = jget('rv:failed', []); failed.push({ ...item, error: e.message }); jset('rv:failed', failed.slice(-100));
+            } else { this.st.last_error = 'Offline or Google is not reachable'; this.st.online = false; break; }
+          }
+          jset('rv:queue', this.queue().filter((x) => x.id !== id));
+          this.st.last_ok = nowS(); this.st.last_error = null; this.st.online = true;
+        }
+      } finally { this.flushing = false; }
+      if (this.queue().length && this.sheet().url) { clearTimeout(this.timer); this.timer = setTimeout(() => this.flush(), 8000); }
+    },
+    localKey: (exam) => 'rv:local:' + norm(exam),
+    localRows(exam) { return jget(this.localKey(exam), {}); },
+    config() { const { url } = this.sheet(); const l = this.cfg().sheet || ''; return { configured: !!url, masked: l.length > 56 ? l.slice(0, 40) + '…' + l.slice(-9) : l }; },
+    async setConfig(sheet) {
+      const link = String(sheet || '').trim(), cfg = this.cfg();
+      if (!link) { delete cfg.sheet; this.saveCfg(cfg); return { ...this.config(), verified: false }; }
+      if (!SHEET_RE.test(link)) throw new Error('That is not a Google Apps Script link. It should look like https://script.google.com/macros/s/.../exec?key=YOUR_SECRET');
+      let key = ''; try { key = new URL(link).searchParams.get('key') || ''; } catch {}
+      if (!key) throw new Error('Add  ?key=YOUR_SECRET  at the end of the link (the secret you set in the script).');
+      const old = cfg.sheet; cfg.sheet = link; this.saveCfg(cfg);
+      let verified = false;
+      try { await this.call({ action: 'ping' }, 40000); verified = true; }
+      catch (e) {
+        if (e instanceof ScriptErr) { if (old) cfg.sheet = old; else delete cfg.sheet; this.saveCfg(cfg); throw new Error(e.message); }
+      }
+      // judgements made before the sheet was connected go up too (saving again is harmless)
+      Object.keys(localStorage).filter((k) => k.startsWith('rv:local:')).forEach((k) => {
+        const exam = (jget(k, {}).__exam) || ''; const rows = jget(k, {});
+        Object.values(rows).forEach((r) => { if (r && r.candidate && exam) this.enqueue({ action: 'save', exam, row: r }); });
+      });
+      return { ...this.config(), verified };
+    },
+    status() { return { configured: !!this.sheet().url, queued: this.queue().length, online: this.st.online, last_ok: this.st.last_ok, last_error: this.st.last_error }; },
+    async exams() {
+      let exams = [], source = 'local';
+      if (this.sheet().url) {
+        try { exams = (await this.call({ action: 'listExams' }, 40000)).exams || []; const c = this.cfg(); c.examsCache = exams; this.saveCfg(c); source = 'sheet'; }
+        catch { exams = this.cfg().examsCache || []; source = 'cache'; }
+      }
+      const names = new Set(exams.map((e) => norm(e.name)));
+      const queued = this.queue().map((x) => x.exam).filter(Boolean);
+      let extra;
+      if (source === 'sheet') {
+        const qn = new Set(queued.map(norm)), c = this.cfg();
+        const kept = (c.exams || []).filter((n) => names.has(norm(n)) || qn.has(norm(n)));
+        if (kept.length !== (c.exams || []).length) { c.exams = kept; this.saveCfg(c); }
+        extra = queued;
+      } else extra = [...(this.cfg().exams || []), ...queued];
+      extra.forEach((n) => { if (!names.has(norm(n))) { names.add(norm(n)); exams.push({ name: n, status: 'Active' }); } });
+      exams.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+      return { exams, source };
+    },
+    async newExam(name, reviewer) {
+      name = cleanExam(name);
+      for (const e of (await this.exams()).exams) if (norm(e.name) === norm(name)) return { name: e.name, existing: true };
+      const c = this.cfg(); c.exams = [...new Set([...(c.exams || []), name])].sort(); this.saveCfg(c);
+      this.enqueue({ action: 'createExam', exam: name, by: String(reviewer || '').slice(0, 40) });
+      return { name, existing: false };
+    },
+    save(b) {
+      const exam = cleanExam(b.exam), cand = String(b.candidate || '').trim();
+      const reviewer = String(b.reviewer || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+      if (!cand || cand.length > 60 || /[\\/:*?"<>|]/.test(cand)) throw new Error('Invalid candidate number: ' + b.candidate);
+      if (!reviewer) throw new Error('Enter your name first');
+      const L = { cheat: 'Cheater', maybe: 'Unsure', clean: 'Not a cheater' };
+      if (b.verdict && !L[b.verdict]) throw new Error('Unknown verdict');
+      const rows = this.localRows(exam); rows.__exam = exam;
+      const c = this.cfg(); if (!(c.exams || []).some((n) => norm(n) === norm(exam))) { c.exams = [...(c.exams || []), exam]; this.saveCfg(c); }
+      if (!b.verdict && !String(b.comment || '').trim() && !b.pct) {
+        const row = { candidate: cand, reviewer, at: nowS() };
+        delete rows[cand]; jset(this.localKey(exam), rows);
+        this.enqueue({ action: 'clear', exam, row });
+        return { saved: true, cleared: true };
+      }
+      const row = { candidate: cand, verdict: L[b.verdict] || '', pct: Math.max(0, Math.min(100, Math.round(+b.pct) || 0)), comment: String(b.comment || '').trim().slice(0, 4000), reviewer, at: nowS() };
+      rows[cand] = row; jset(this.localKey(exam), rows);
+      this.enqueue({ action: 'save', exam, row });
+      return { saved: true, row };
+    },
+    async examRows(exam) {
+      let stale = false, sheetUrl = null, rows;
+      const ck = 'rv:cache:' + norm(exam);
+      if (this.sheet().url) {
+        try {
+          const d = await this.call({ action: 'rows', exam }, 45000);
+          rows = {}; (d.rows || []).forEach((r) => { rows[r.candidate] = r; }); sheetUrl = d.sheetUrl;
+          jset(ck, { rows, sheetUrl });
+        } catch { const c = jget(ck, {}); rows = c.rows || {}; sheetUrl = c.sheetUrl || null; stale = true; }
+      } else { rows = { ...this.localRows(exam) }; delete rows.__exam; }
+      this.queue().forEach((it) => {
+        if (it.exam !== exam || !it.row) return;
+        if (it.action === 'save') rows[it.row.candidate] = it.row; else if (it.action === 'clear') delete rows[it.row.candidate];
+      });
+      return { rows: Object.values(rows).sort(natural), stale, sheet_url: sheetUrl };
+    },
+    rows(exam) { return this.examRows(cleanExam(exam)); },
+    async exportXlsx(names) {
+      names = names && names.length ? names : (await this.exams()).exams.map((e) => e.name);
+      if (!names.length) throw new Error('There are no exams to export yet');
+      const T = { 'Cheater': 3, 'Unsure': 4, 'Not a cheater': 5 };
+      const sheets = [], used = new Set(['summary']), summary = [], byRev = [];
+      for (const name of names) {
+        const { rows } = await this.examRows(name);
+        let title = name.replace(/[\[\]:*?/\\]/g, '-').slice(0, 31), base = title, k = 2;
+        while (used.has(title.toLowerCase())) title = base.slice(0, 28) + '-' + k++;
+        used.add(title.toLowerCase());
+        const data = [['Candidate no.', 'Cheater?', 'Fraud %', 'Comments', 'Reviewed by', 'Reviewed at'].map((v) => ({ v, s: 1 }))];
+        rows.forEach((r) => data.push([r.candidate, { v: r.verdict || '', s: T[r.verdict] || 0 }, { v: Number(r.pct) || 0, s: 6 }, { v: r.comment || '', s: 2 }, r.reviewer || '', r.at || '']));
+        sheets.push({ name: title, data, widths: [15, 16, 10, 70, 18, 18], filter: `A1:F${Math.max(2, rows.length + 1)}` });
+        const cnt = (v) => rows.filter((r) => r.verdict === v).length, p = rows.map((r) => Number(r.pct) || 0);
+        summary.push([name, rows.length, cnt('Cheater'), cnt('Unsure'), cnt('Not a cheater'), p.length ? Math.round(p.reduce((a, b) => a + b, 0) / p.length * 10) / 10 : 0]);
+        const who = {}; rows.forEach((r) => { who[r.reviewer || ''] = (who[r.reviewer || ''] || 0) + 1; });
+        Object.keys(who).sort().forEach((w) => byRev.push([name, w, who[w]]));
+      }
+      const H = (arr) => arr.map((v) => ({ v, s: 1 }));
+      const sdata = [H(['Exam', 'Judged', 'Cheater', 'Unsure', 'Not a cheater', 'Average fraud %']), ...summary, [], [], H(['Exam', 'Reviewer', 'Candidates judged']), ...byRev];
+      sheets.splice(names.length > 1 ? 0 : sheets.length, 0, { name: 'Summary', data: sdata, widths: [30, 18, 18, 12, 16, 18] });
+      return makeXlsx(sheets);
+    },
+  };
+  const rv = {
+    config: () => viaHelper() ? api('/api/review/config') : B.config(),
+    setConfig: (sheet) => viaHelper() ? post('/api/review/config', { sheet }) : B.setConfig(sheet),
+    status: () => viaHelper() ? api('/api/review/status') : B.status(),
+    exams: async () => viaHelper() ? (await api('/api/review/exams')) : B.exams(),
+    newExam: (name, reviewer) => viaHelper() ? post('/api/review/exams', { name, reviewer }) : B.newExam(name, reviewer),
+    save: (body) => viaHelper() ? post('/api/review', body) : B.save(body),
+    rows: (exam) => viaHelper() ? api('/api/review/rows?exam=' + encodeURIComponent(exam)) : B.rows(exam),
+  };
+
+  /* ---- minimal .xlsx writer (stored zip, inline strings, a few styles) ---- */
+  function makeXlsx(sheets) {
+    const enc = new TextEncoder();
+    const x = (s) => String(s).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const col = (i) => { let s = ''; for (i++; i > 0; i = Math.floor((i - 1) / 26)) s = String.fromCharCode(65 + (i - 1) % 26) + s; return s; };
+    const sheetXml = (sh) => {
+      let rowsX = '';
+      sh.data.forEach((row, r) => {
+        let cells = '';
+        row.forEach((c, i) => {
+          const o = (c !== null && typeof c === 'object') ? c : { v: c, s: 0 }, ref = col(i) + (r + 1), s = o.s ? ` s="${o.s}"` : '';
+          if (typeof o.v === 'number') cells += `<c r="${ref}"${s}><v>${o.v}</v></c>`;
+          else cells += `<c r="${ref}"${s} t="inlineStr"><is><t xml:space="preserve">${x(o.v)}</t></is></c>`;
+        });
+        rowsX += `<row r="${r + 1}">${cells}</row>`;
+      });
+      return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+        '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' +
+        '<cols>' + sh.widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('') + '</cols>' +
+        `<sheetData>${rowsX}</sheetData>` + (sh.filter ? `<autoFilter ref="${sh.filter}"/>` : '') + '</worksheet>';
+    };
+    const styles = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+      '<numFmts count="1"><numFmt numFmtId="164" formatCode="0&quot;%&quot;"/></numFmts>' +
+      '<fonts count="5"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>' +
+      '<font><b/><sz val="11"/><color rgb="FFC2271D"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFA76A00"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FF14804A"/><name val="Calibri"/></font></fonts>' +
+      '<fills count="6"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>' +
+      ['111318', 'FDECEB', 'FFF3D9', 'E6F5EC'].map((c) => `<fill><patternFill patternType="solid"><fgColor rgb="FF${c}"/><bgColor indexed="64"/></patternFill></fill>`).join('') + '</fills>' +
+      '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+      '<cellXfs count="7"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+      '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>' +
+      '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>' +
+      '<xf numFmtId="0" fontId="2" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1"/>' +
+      '<xf numFmtId="0" fontId="3" fillId="4" borderId="0" xfId="0" applyFont="1" applyFill="1"/>' +
+      '<xf numFmtId="0" fontId="4" fillId="5" borderId="0" xfId="0" applyFont="1" applyFill="1"/>' +
+      '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
+    const NS = 'http://schemas.openxmlformats.org/';
+    const files = [
+      ['[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="${NS}package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>` +
+        sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('') + '</Types>'],
+      ['_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="${NS}package/2006/relationships"><Relationship Id="rId1" Type="${NS}officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`],
+      ['xl/workbook.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="${NS}spreadsheetml/2006/main" xmlns:r="${NS}officeDocument/2006/relationships"><sheets>` +
+        sheets.map((s, i) => `<sheet name="${x(s.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('') + '</sheets></workbook>'],
+      ['xl/_rels/workbook.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="${NS}package/2006/relationships">` +
+        sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="${NS}officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('') +
+        `<Relationship Id="rId${sheets.length + 1}" Type="${NS}officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`],
+      ['xl/styles.xml', styles],
+      ...sheets.map((s, i) => [`xl/worksheets/sheet${i + 1}.xml`, sheetXml(s)]),
+    ];
+    // zip (no compression)
+    const tbl = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; tbl[n] = c >>> 0; }
+    const crc = (b) => { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = tbl[(c ^ b[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+    const parts = [], central = []; let off = 0;
+    const u16 = (n) => [n & 255, (n >> 8) & 255], u32 = (n) => [n & 255, (n >>> 8) & 255, (n >>> 16) & 255, (n >>> 24) & 255];
+    files.forEach(([name, text]) => {
+      const nb = enc.encode(name), db = enc.encode(text), c = crc(db);
+      const lh = new Uint8Array([0x50, 0x4b, 3, 4, ...u16(20), ...u16(0x0800), ...u16(0), ...u16(0), ...u16(0x21), ...u32(c), ...u32(db.length), ...u32(db.length), ...u16(nb.length), ...u16(0)]);
+      parts.push(lh, nb, db);
+      central.push(new Uint8Array([0x50, 0x4b, 1, 2, ...u16(20), ...u16(20), ...u16(0x0800), ...u16(0), ...u16(0), ...u16(0x21), ...u32(c), ...u32(db.length), ...u32(db.length), ...u16(nb.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(off)]), nb);
+      off += lh.length + nb.length + db.length;
+    });
+    const csize = central.reduce((a, b) => a + b.length, 0);
+    const end = new Uint8Array([0x50, 0x4b, 5, 6, ...u16(0), ...u16(0), ...u16(files.length), ...u16(files.length), ...u32(csize), ...u32(off), ...u16(0)]);
+    return new Blob([...parts, ...central, end], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  }
   const band = (p) => p >= 70 ? ['High', 'high'] : p >= 30 ? ['Medium', 'mid'] : ['Low', 'low'];
   const natural = (a, b) => /^\d+$/.test(a.candidate) && /^\d+$/.test(b.candidate) ? a.candidate - b.candidate : a.candidate.localeCompare(b.candidate);
   const nowT = () => (typeof v1 !== 'undefined' && v1 && isFinite(v1.currentTime)) ? fmt(v1.currentTime) : '00:00:00';
@@ -873,24 +1129,24 @@ document.addEventListener('keydown', (e) => {
     const set = (html, level) => { t.innerHTML = html; pill.className = 'rvpill' + (level ? ' ' + level : ''); dot.classList.toggle('warn', !!level); pill.classList.toggle('hidden', !html); t.title = t.textContent; };
     if (msg) return set(esc(msg), isErr ? 'bad' : 'warn');
     if (!s) return set('');
-    if (!s.configured) set('Saved on this PC only', 'warn');
+    if (!s.configured) set('Saved on this computer only', 'warn');
     else if (s.last_error && String(s.last_error).startsWith('Wrong key')) set(esc(s.last_error) + '. Paste the link again.', 'bad');
     else if (s.queued > 0) set(`${s.queued} waiting to upload` + (s.online === false ? ' · offline' : '…'), 'warn');
     else set('<b>Synced</b>' + (s.last_ok ? '<span class="t">' + esc(s.last_ok.slice(11)) + '</span>' : ''));
   }
   async function pollStatus() {
     if (!ready()) return;
-    try { R.st = await api('/api/review/status'); paintSync(); } catch {}
+    try { R.st = await rv.status(); paintSync(); } catch {}
   }
-  async function loadConfig() { try { R.cfg = await api('/api/review/config'); } catch {} paintConfig(); }
+  async function loadConfig() { try { R.cfg = await rv.config(); } catch {} paintConfig(); }
   async function connect() {
     const v = $('rvSheet').value.trim();
     if (v === R.cfg.masked || v.includes('…')) return;          // untouched
     paintSync('Connecting…');
     try {
-      const r = await post('/api/review/config', { sheet: v });
+      const r = await rv.setConfig(v);
       R.cfg = r; paintConfig();
-      toast(!v ? 'Disconnected. Judgements are saved on this PC only.'
+      toast(!v ? 'Disconnected. Judgements are saved on this computer only.'
         : r.verified ? 'Connected to the Google Sheet.' : 'Saved. Google could not be reached just now; it will connect when the internet is back.');
       await loadExams(); await loadRows(); pollStatus();
     } catch (e) { paintSync(e.message, true); }
@@ -913,7 +1169,7 @@ document.addEventListener('keydown', (e) => {
   }
   async function loadExams() {
     let list;
-    try { list = (await api('/api/review/exams')).exams; } catch { return; }
+    try { list = (await rv.exams()).exams; } catch { return; }
     R.exams = list.filter((e) => String(e.status || 'Active').toLowerCase() !== 'closed' || e.name === R.exam).map((e) => e.name);
     if (!R.exams.includes(R.exam)) R.exam = R.exams[0] || '';
     store.set('rv:exam', R.exam);
@@ -941,7 +1197,7 @@ document.addEventListener('keydown', (e) => {
     const old = R.exam;
     $('rvNewName').value = ''; R.adding = false; paintNew();
     try {
-      const r = await post('/api/review/exams', { name, reviewer: R.name });
+      const r = await rv.newExam(name, R.name);
       R.exam = r.name;
       toast(r.existing ? `"${r.name}" already exists, switched to it.` : `Exam "${r.name}" added.`);
       await loadExams(); await switchExam(old);
@@ -954,7 +1210,7 @@ document.addEventListener('keydown', (e) => {
     const exam = R.exam;
     if (!exam) { R.rows = {}; refreshAll(); return; }
     try {
-      const r = await api('/api/review/rows?exam=' + encodeURIComponent(exam));
+      const r = await rv.rows(exam);
       if (exam !== R.exam) return;
       R.rows = {}; r.rows.forEach((x) => { R.rows[x.candidate] = x; });
       R.sheetUrl = r.sheet_url; R.stale = !!r.stale;
@@ -1001,7 +1257,7 @@ document.addEventListener('keydown', (e) => {
   async function saveNow(exam, cand, d) {
     if (!cand || !R.name || !exam) return;
     try {
-      const r = await post('/api/review', { exam, candidate: cand, reviewer: R.name, verdict: d.verdict, pct: d.pct, comment: d.comment });
+      const r = await rv.save({ exam, candidate: cand, reviewer: R.name, verdict: d.verdict, pct: d.pct, comment: d.comment });
       if (exam !== R.exam) return;
       const s = reviewed();
       if (r.cleared || !r.row) { delete R.rows[cand]; s.delete(cand); saveReviewed(s); }
@@ -1033,7 +1289,7 @@ document.addEventListener('keydown', (e) => {
   function renderReport() {
     if (!R.reportOpen || !ready()) return;
     $('rvRName').textContent = R.exam || 'No exam';
-    $('rvRSub').textContent = R.cfg.configured ? '· its own Google Sheet, all reviewers' : '· saved on this PC only';
+    $('rvRSub').textContent = R.cfg.configured ? '· its own Google Sheet, all reviewers' : '· saved on this computer only';
     $('rvLive').classList.toggle('hidden', !(R.cfg.configured && !R.stale));
     $('rvOpenGs').classList.toggle('hidden', !(R.sheetUrl && /^https:\/\/docs\.google\.com\//.test(R.sheetUrl)));
     const rows = Object.values(R.rows).sort(natural), next = {};
@@ -1064,10 +1320,14 @@ document.addEventListener('keydown', (e) => {
     btn.disabled = true; btn.textContent = 'Preparing…';
     try {
       await flushPending(R.exam);
-      const r = await fetch(API + '/api/review/export' + (all ? '' : '?exams=' + encodeURIComponent(R.exam)));
-      if (!r.ok) { let m = r.statusText; try { m = (await r.json()).detail || m; } catch {} throw new Error(m); }
+      let blob;
+      if (viaHelper()) {
+        const r = await fetch(API + '/api/review/export' + (all ? '' : '?exams=' + encodeURIComponent(R.exam)));
+        if (!r.ok) { let m = r.statusText; try { m = (await r.json()).detail || m; } catch {} throw new Error(m); }
+        blob = await r.blob();
+      } else blob = await B.exportXlsx(all ? null : [R.exam]);
       const a = document.createElement('a');
-      a.href = URL.createObjectURL(await r.blob());
+      a.href = URL.createObjectURL(blob);
       a.download = all ? 'candidates_review_' + new Date().toISOString().slice(0, 10) + '.xlsx' : R.exam.replace(/[^\w.\- ]+/g, '_') + '.xlsx';
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
@@ -1086,6 +1346,14 @@ document.addEventListener('keydown', (e) => {
     if (!R.booted) { R.booted = true; boot(); } else { loadRows(); pollStatus(); }
   }
   window.rvEnter = () => { paintVisibility(); start(); };
+  window.rvReboot = () => { R.rows = {}; R.prevKeys = null; boot(); };
+  // Team link: ?sheet=<Google script link> (or DEFAULT_SHEET above) connects everyone with no typing
+  (() => {
+    let link = DEFAULT_SHEET;
+    try { link = new URLSearchParams(location.search).get('sheet') || link; } catch {}
+    if (link && !viaHelper() && B.cfg().sheet !== link) { B.saveCfg({ ...B.cfg(), sheet: link }); }
+    if (link && /[?&]sheet=/.test(location.search)) { try { history.replaceState(null, '', location.pathname); } catch {} }
+  })();
   window.rvOnList = () => {
     if (folder && R.exam && ready()) store.set('rv:folder:' + R.exam, folder);   // each exam remembers its own video folder
     paintVisibility(); paintProgress(); if (!R.booted) start();
