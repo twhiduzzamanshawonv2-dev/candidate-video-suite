@@ -1,0 +1,209 @@
+/**
+ * Candidate Review - Google Sheet backend
+ *
+ * SET UP (about 5 minutes, once)
+ *  1. Create a new empty Google Sheet. This is the "Exam index" (it lists every exam).
+ *  2. In that sheet: Extensions > Apps Script. Delete the sample code and paste ALL of this.
+ *  3. Change SECRET below to a long random text (letters and digits only), then Save.
+ *  4. Pick the function  setup  in the toolbar and press Run. Allow the permissions it asks for.
+ *  5. Deploy > New deployment > type: Web app
+ *       Execute as: Me          Who has access: Anyone
+ *     Press Deploy and copy the "Web app URL".
+ *  6. In the Candidate Video Suite, paste the URL followed by  ?key=  and your SECRET:
+ *       https://script.google.com/macros/s/XXXX/exec?key=YOUR_SECRET
+ *
+ * Each exam gets its own Google Sheet file, created automatically next to this index sheet.
+ * Reviewers never need access to these sheets: the app writes through this script.
+ * To hide a finished exam from the dropdown, set its Status to Closed in the Exams tab.
+ */
+var SECRET = 'CHANGE-ME-TO-A-LONG-RANDOM-TEXT';
+
+var HEADERS = ['Candidate no.', 'Cheater?', 'Fraud %', 'Comments', 'Reviewed by', 'Reviewed at'];
+var INDEX_HEADERS = ['Exam', 'Status', 'Sheet ID', 'Sheet link', 'Created by', 'Created on'];
+
+/** Run once from the editor so Google asks for the permissions this script needs. */
+function setup() {
+  indexSheet_();
+  DriveApp.getRootFolder();
+  Logger.log('Ready. Now deploy it as a Web app (Deploy > New deployment).');
+}
+
+function doGet() {
+  return out_({ ok: true, info: 'Candidate Review backend is running.' });
+}
+
+function doPost(e) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30000);
+    var b = JSON.parse(e.postData.contents);
+    if (b.key !== SECRET) return out_({ ok: false, error: 'Wrong key in the Google Sheet link' });
+    switch (b.action) {
+      case 'ping':       return out_({ ok: true });
+      case 'listExams':  return out_({ ok: true, exams: listExams_() });
+      case 'createExam': var ex = createExam_(b.exam, b.by); return out_({ ok: true, sheetUrl: ex.url });
+      case 'save':       return out_(save_(b.exam, b.row));
+      case 'clear':      return out_(clear_(b.exam, b.row));
+      case 'rows':       return out_(rows_(b.exam));
+      default:           return out_({ ok: false, error: 'Unknown action' });
+    }
+  } catch (err) {
+    return out_({ ok: false, error: String(err) });
+  } finally {
+    try { lock.releaseLock(); } catch (x) {}
+  }
+}
+
+function out_(o) {
+  return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
+}
+
+function norm_(s) {
+  return String(s).replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/* ---------- exam index ---------- */
+
+function indexSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName('Exams');
+  if (!sh) { sh = ss.getSheets()[0]; sh.setName('Exams'); }
+  if (sh.getLastRow() === 0) {
+    sh.getRange(1, 1, 1, INDEX_HEADERS.length).setValues([INDEX_HEADERS]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+    sh.getRange('A:F').setNumberFormat('@');
+    sh.setColumnWidth(1, 240); sh.setColumnWidth(4, 360);
+  }
+  return sh;
+}
+
+function listExams_() {
+  var sh = indexSheet_(), n = sh.getLastRow();
+  if (n < 2) return [];
+  return sh.getRange(2, 1, n - 1, INDEX_HEADERS.length).getValues()
+    .filter(function (r) { return r[0] !== ''; })
+    .map(function (r) { return { name: String(r[0]), status: String(r[1] || 'Active'), url: String(r[3]) }; });
+}
+
+function findExam_(name) {
+  var sh = indexSheet_(), n = sh.getLastRow();
+  if (n < 2) return null;
+  var vals = sh.getRange(2, 1, n - 1, INDEX_HEADERS.length).getValues();
+  var key = norm_(name);
+  for (var i = 0; i < vals.length; i++) {
+    if (norm_(vals[i][0]) === key) return { row: i + 2, name: String(vals[i][0]), id: String(vals[i][2]), url: String(vals[i][3]) };
+  }
+  return null;
+}
+
+/** Makes the exam's own Google Sheet file (once) and lists it in the index. */
+function createExam_(name, by) {
+  name = String(name).replace(/\s+/g, ' ').trim();
+  if (!name || name.length > 80) throw new Error('Bad exam name');
+  var found = findExam_(name);
+  if (found) return found;
+
+  var file = SpreadsheetApp.create(name);
+  try {   // keep it in the same Drive folder as this index sheet
+    var parents = DriveApp.getFileById(SpreadsheetApp.getActiveSpreadsheet().getId()).getParents();
+    if (parents.hasNext()) {
+      var f = DriveApp.getFileById(file.getId());
+      parents.next().addFile(f);
+      DriveApp.getRootFolder().removeFile(f);
+    }
+  } catch (e) {}
+
+  var sh = file.getSheets()[0];
+  sh.setName('Reviews');
+  sh.getRange('A:F').setNumberFormat('@');                       // text only: nothing is ever read as a formula or date
+  sh.getRange('C:C').setNumberFormat('0');
+  sh.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS])
+    .setFontWeight('bold').setBackground('#111318').setFontColor('#ffffff');
+  sh.setFrozenRows(1);
+  [110, 110, 80, 460, 130, 130].forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
+  var range = sh.getRange('B2:B');
+  sh.setConditionalFormatRules([
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Cheater').setBackground('#FDECEB').setFontColor('#C2271D').setRanges([range]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Unsure').setBackground('#FFF3D9').setFontColor('#A76A00').setRanges([range]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo('Not a cheater').setBackground('#E6F5EC').setFontColor('#14804A').setRanges([range]).build()
+  ]);
+
+  var sum = file.insertSheet('Summary');
+  sum.getRange('A1:B6').setValues([
+    ['Candidates judged', '=COUNTA(Reviews!A2:A)'],
+    ['Cheater', '=COUNTIF(Reviews!B2:B,"Cheater")'],
+    ['Unsure', '=COUNTIF(Reviews!B2:B,"Unsure")'],
+    ['Not a cheater', '=COUNTIF(Reviews!B2:B,"Not a cheater")'],
+    ['Average fraud %', '=IFERROR(ROUND(AVERAGE(Reviews!C2:C),1),0)'],
+    ['', '']
+  ]);
+  sum.getRange('A1:A5').setFontWeight('bold');
+  sum.setColumnWidth(1, 180);
+
+  var log = file.insertSheet('Change log');
+  log.getRange(1, 1, 1, 7).setValues([['Time', 'Reviewer', 'Candidate no.', 'Action', 'Cheater?', 'Fraud %', 'Comments']]).setFontWeight('bold');
+  log.setFrozenRows(1);
+  log.getRange('A:G').setNumberFormat('@');
+
+  var idx = indexSheet_();
+  idx.appendRow([name, 'Active', file.getId(), file.getUrl(), String(by || ''), Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm')]);
+  return { name: name, id: file.getId(), url: file.getUrl() };
+}
+
+/* ---------- one exam ---------- */
+
+function findRow_(sh, cand) {
+  var n = sh.getLastRow();
+  if (n < 2) return 0;
+  var col = sh.getRange(2, 1, n - 1, 1).getValues();
+  for (var i = 0; i < col.length; i++) if (String(col[i][0]).trim() === cand) return i + 2;
+  return 0;
+}
+
+function log_(file, row, action) {
+  var log = file.getSheetByName('Change log');
+  if (!log) return;
+  log.appendRow([row.at || '', row.reviewer || '', String(row.candidate), action, row.verdict || '', row.pct === undefined ? '' : String(row.pct), row.comment || '']);
+}
+
+function save_(exam, r) {
+  var ex = findExam_(exam) || createExam_(exam, r.reviewer);
+  var file = SpreadsheetApp.openById(ex.id);
+  var sh = file.getSheetByName('Reviews');
+  var cand = String(r.candidate).trim();
+  var vals = [cand, String(r.verdict || ''), String(Math.max(0, Math.min(100, Number(r.pct) || 0))), String(r.comment || ''), String(r.reviewer || ''), String(r.at || '')];
+  var row = findRow_(sh, cand);
+  if (!row) row = Math.max(2, sh.getLastRow() + 1);
+  sh.getRange(row, 1, 1, 6).setValues([vals]);
+  log_(file, r, 'save');
+  return { ok: true, sheetUrl: ex.url };
+}
+
+function clear_(exam, r) {
+  var ex = findExam_(exam);
+  if (!ex) return { ok: true };
+  var file = SpreadsheetApp.openById(ex.id);
+  var sh = file.getSheetByName('Reviews');
+  var row = findRow_(sh, String(r.candidate).trim());
+  if (row) sh.deleteRow(row);
+  log_(file, r, 'clear');
+  return { ok: true, sheetUrl: ex.url };
+}
+
+function rows_(exam) {
+  var ex = findExam_(exam);
+  if (!ex) return { ok: true, rows: [], sheetUrl: null };
+  var sh = SpreadsheetApp.openById(ex.id).getSheetByName('Reviews');
+  var n = sh.getLastRow(), rows = [];
+  if (n >= 2) {
+    sh.getRange(2, 1, n - 1, 6).getValues().forEach(function (v) {
+      if (String(v[0]).trim() === '') return;
+      rows.push({
+        candidate: String(v[0]).trim(), verdict: String(v[1]), pct: Number(v[2]) || 0,
+        comment: String(v[3]), reviewer: String(v[4]),
+        at: v[5] instanceof Date ? Utilities.formatDate(v[5], Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm') : String(v[5])
+      });
+    });
+  }
+  return { ok: true, rows: rows, sheetUrl: ex.url };
+}

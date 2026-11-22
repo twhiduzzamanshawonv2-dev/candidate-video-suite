@@ -1,0 +1,1170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Candidate Video Reviewer</title>
+<script>
+  (function () {
+    var t = null;
+    try { t = localStorage.getItem('theme'); } catch (e) {}
+    if (t !== 'light' && t !== 'dark') t = window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', t);
+  })();
+</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+  /* Candidate Video Reviewer: one stylesheet.
+     Palette: ink blue-black, teal accent, verdict red / amber / green. Tokens first, then page, header, strips,
+     players, transport, judgement panel, final report sheet. Small screens fall back to a scrolling page at the end. */
+  :root {
+    --bg:#0a0e14; --bg2:#0f1520; --panel:#111823; --panel2:#0d141d; --line:#1d2836; --line2:#2a384b;
+    --text:#eaf0f8; --muted:#9aa9bf; --dim:#64748b;
+    --accent:#2dd4bf; --accent-ink:#04201c; --accent-soft:#0f3a35;
+    --ok:#34d399; --warn:#fbbf24; --err:#fb7185; --rev:#86efac;
+    --b-ok-bg:#063d2a; --b-ok-fg:#86efac; --b-warn-bg:#4a2a05; --b-warn-fg:#fcd34d; --b-bad-bg:#4c0f20; --b-bad-fg:#fda4af;
+    --ink:#eaf0f8; --ink-fg:#0a0e14; --primary-hover:#eaf0f8; --banner-bg:#1c1917; --ended-bg:rgba(2,4,7,.72);
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 12px 28px -14px rgba(0,0,0,.7); --stage:#020407;
+    --font:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --head:"Space Grotesk",Inter,system-ui,sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+    color-scheme:dark;
+  }
+  :root[data-theme="light"] {
+    color-scheme:light;
+    --bg:#eef1f5; --bg2:#e3e8ef; --panel:#ffffff; --panel2:#f7f9fb; --line:#e2e7ee; --line2:#cfd7e2;
+    --text:#0f1b2d; --muted:#51607a; --dim:#8693a8;
+    --accent:#0d9488; --accent-ink:#ffffff; --accent-soft:#d9f3ef;
+    --ok:#16a34a; --warn:#d97706; --err:#e11d48; --rev:#15803d;
+    --b-ok-bg:#dcfce7; --b-ok-fg:#166534; --b-warn-bg:#fef3c7; --b-warn-fg:#92400e; --b-bad-bg:#ffe4e9; --b-bad-fg:#9f1239;
+    --ink:#0f1b2d; --ink-fg:#f8fafc; --primary-hover:#0f1b2d; --banner-bg:#fffbeb; --ended-bg:rgba(238,241,245,.8);
+    --shadow:0 1px 2px rgba(15,27,45,.06), 0 8px 24px -12px rgba(15,27,45,.18); --stage:#05080d;
+  }
+  html, body { height:100%; }
+  * { box-sizing:border-box; }
+  .hidden { display:none !important; }
+  .grow { flex:1; }
+  body { margin:0; color:var(--text); display:flex; flex-direction:column; overflow:hidden; font-family:var(--font); font-size:13px; line-height:1.45; -webkit-font-smoothing:antialiased;
+    background-color:var(--bg);
+    background-image:radial-gradient(900px 340px at 10% -90px, color-mix(in srgb, var(--accent) 14%, transparent), transparent 70%), radial-gradient(700px 300px at 96% -70px, color-mix(in srgb, var(--warn) 9%, transparent), transparent 70%);
+    background-repeat:no-repeat; }
+  header { flex:none; display:flex; align-items:center; padding:10px 16px; gap:12px; }
+  header h1 { margin:0; display:flex; align-items:center; gap:10px; font-family:var(--head); font-size:16px; font-weight:700; letter-spacing:-.02em; white-space:nowrap; }
+  header button { background:var(--panel); color:var(--text); border:1px solid var(--line2); border-radius:99px; padding:5px 12px; font:inherit; font-size:12px; cursor:pointer; }
+  header button:hover { border-color:var(--accent); }
+  .pill { display:flex; align-items:center; gap:7px; font-size:12px; color:var(--muted); background:var(--panel); border:1px solid var(--line); padding:5px 11px; border-radius:99px; white-space:nowrap; }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--err); flex:none; }
+  .dot.on { background:var(--ok); }
+  .dot.warn { background:var(--warn); }
+  .dot { box-shadow:0 0 0 3px color-mix(in srgb, var(--err) 25%, transparent); }
+  .dot.on { box-shadow:0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
+  .dot.warn { box-shadow:0 0 0 3px color-mix(in srgb, var(--warn) 25%, transparent); }
+  .mark { width:30px; height:30px; border-radius:9px; background:linear-gradient(145deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #0f1b2d)); display:grid; place-items:center; box-shadow:0 6px 14px -6px var(--accent); flex:none; }
+  .mark svg { width:17px; height:17px; }
+  main { flex:1; min-height:0; width:100%; max-width:none; margin:0 auto; padding:0 16px 12px; display:flex; flex-direction:column; }   /* full width: was max-width:1560px */
+  #rvView:not(.hidden) { display:flex; flex-direction:column; gap:10px; flex:1; min-height:0; }
+  .mono { font-family:var(--mono); color:var(--dim); font-size:11px; }
+  .banner { background:var(--banner-bg); border:1px solid var(--warn); border-radius:12px; padding:10px 14px; font-size:12.5px; color:var(--muted); }
+  .banner b { color:var(--text); }
+  .banner a { color:var(--accent); }
+  #setup { margin-bottom:10px; }
+  .toast { position:fixed; left:50%; bottom:28px; transform:translateX(-50%) translateY(18px); background:var(--ink); color:var(--ink-fg); padding:12px 18px; border-radius:12px; font-size:13.5px; line-height:1.4; max-width:min(560px, calc(100vw - 32px)); box-shadow:0 10px 30px rgba(0,0,0,.28); opacity:0; pointer-events:none; transition:opacity .25s, transform .25s; z-index:80; }
+  .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+  .syncdot { width:6px; height:6px; border-radius:50%; background:var(--ok); } .syncdot.warn { background:var(--warn); }
+
+  /* shared controls inside the reviewer */
+  #rvView button { background:var(--panel); color:var(--text); border:1px solid var(--line2); border-radius:10px; padding:7px 13px; font-size:13px; font-weight:500; white-space:nowrap; cursor:pointer; transition:background .15s, border-color .15s, transform .08s, box-shadow .15s; }
+  #rvView button:hover:not(:disabled) { border-color:var(--accent); background:var(--panel2); color:var(--text); }
+  #rvView button:active:not(:disabled) { transform:translateY(1px); }
+  #rvView button:disabled { opacity:.4; cursor:default; }
+  #rvView button.primary { background:var(--ink); color:var(--ink-fg); border-color:var(--ink); }
+  #rvView button.primary:hover:not(:disabled) { background:var(--ink); color:var(--ink-fg); box-shadow:0 6px 16px -6px color-mix(in srgb, var(--ink) 60%, transparent); }
+  #rvView button.accent { background:var(--accent); color:var(--accent-ink); border-color:var(--accent); font-weight:600; }
+  #rvView button.accent:hover:not(:disabled) { background:var(--accent); color:var(--accent-ink); box-shadow:0 6px 18px -6px color-mix(in srgb, var(--accent) 70%, transparent); }
+  #rvView input[type=text], #rvView select { background:var(--panel); color:var(--text); border:1px solid var(--line2); border-radius:10px; padding:7px 11px; font-size:13px; min-width:0; transition:border-color .15s, box-shadow .15s; }
+  #rvView input[type=text]:focus, #rvView select:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+  #rvView :focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  #rvView label.l { margin:0 0 4px; font-size:10px; font-weight:600; letter-spacing:.07em; text-transform:uppercase; color:var(--muted); }
+  #rvView .card { background:var(--panel); border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow); padding:0; margin:0; }
+  #rvView .grow { flex:1; }
+  #rvView input[type=range] { -webkit-appearance:none; appearance:none; background:transparent; flex:1; min-width:0; height:20px; cursor:pointer; accent-color:auto; --p:100%; }
+  #rvView input[type=range]::-webkit-slider-runnable-track { height:6px; border-radius:99px; background:linear-gradient(90deg, var(--accent) var(--p), var(--line2) var(--p)); }
+  #rvView input[type=range]::-moz-range-track { height:6px; border-radius:99px; background:var(--line2); }
+  #rvView input[type=range]::-moz-range-progress { height:6px; border-radius:99px; background:var(--accent); }
+  #rvView input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:16px; height:16px; margin-top:-5px; border-radius:50%; background:#fff; border:3px solid var(--accent); box-shadow:0 2px 6px rgba(0,0,0,.25); }
+  #rvView input[type=range]::-moz-range-thumb { width:10px; height:10px; border-radius:50%; background:#fff; border:3px solid var(--accent); }
+
+  /* setup + navigation strips */
+  #rvView .strip { display:flex; gap:10px 14px; align-items:flex-end; padding:9px 14px; flex:none; flex-wrap:wrap; position:relative; }
+  #rvView .strip.nav { align-items:center; }
+  #rvView .nav #folderRv { flex:1 1 220px; width:auto; font-family:var(--mono); font-size:12px; }
+  #rvView .nav select { flex:0 1 190px; font-weight:600; }
+  #rvView .sep { width:1px; align-self:stretch; background:var(--line2); margin:2px; }
+  .rvf { display:flex; flex-direction:column; min-width:0; }
+  .rvgrow { flex:1 1 280px; }
+  #rvView .row { display:flex; gap:8px; align-items:center; margin:0; }
+  #rvView .row > input { flex:1; width:auto; }
+  .rvconn { display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:600; white-space:nowrap; color:var(--muted); }
+  .rvconn.on { color:var(--ok); }
+  .rvsync { display:flex; align-items:center; gap:12px; white-space:nowrap; }
+  .rvpill { display:inline-flex; align-items:center; gap:8px; padding:5px 12px 5px 6px; border-radius:99px; background:var(--b-ok-bg); border:1px solid color-mix(in srgb, var(--ok) 30%, transparent); font-size:12px; color:var(--b-ok-fg); max-width:340px; }
+  .rvpill.warn { background:var(--b-warn-bg); color:var(--b-warn-fg); border-color:color-mix(in srgb, var(--warn) 35%, transparent); }
+  .rvpill.bad { background:var(--b-bad-bg); color:var(--b-bad-fg); border-color:color-mix(in srgb, var(--err) 35%, transparent); }
+  .rvpill:empty { display:none; }
+  .rvdot { width:22px; height:22px; border-radius:50%; background:var(--ok); color:#fff; display:grid; place-items:center; flex:none; }
+  .rvdot.warn { background:var(--warn); }
+  .rvdot svg { width:12px; height:12px; }
+  .rvpill b { font-weight:600; }
+  .rvpill .t { font:500 11.5px var(--mono); opacity:.85; }
+  #rvSyncTxt { overflow:hidden; text-overflow:ellipsis; display:inline-flex; gap:8px; align-items:center; }
+  #rvView a.rvhlp { display:inline-flex; align-items:center; gap:7px; padding:5px 12px 5px 9px; border-radius:99px; background:var(--panel); border:1px solid var(--line2); color:var(--text); font-size:12px; font-weight:500; text-decoration:none; transition:border-color .15s, background .15s; }
+  .rvhlp svg { width:15px; height:15px; color:var(--accent); }
+  #rvView a.rvhlp:hover, #rvView a.rvhlp[aria-expanded="true"] { border-color:var(--accent); background:var(--accent-soft); }
+  .rvhelp { position:absolute; right:0; top:calc(100% + 8px); width:min(560px, 100%); z-index:40; background:var(--panel); border:1px solid var(--line2); border-radius:16px; font-size:13px; color:var(--muted); box-shadow:0 30px 60px -18px rgba(0,0,0,.5); overflow:hidden; white-space:normal; }
+  .hhead { display:flex; align-items:center; gap:12px; padding:14px 16px; background:linear-gradient(180deg, var(--panel2), var(--panel)); border-bottom:1px solid var(--line); }
+  .hico { width:34px; height:34px; border-radius:10px; background:linear-gradient(145deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #0f1b2d)); color:#fff; display:grid; place-items:center; flex:none; }
+  .hico svg { width:18px; height:18px; }
+  .hhead h4 { margin:0; font-family:var(--head); font-size:15px; font-weight:600; color:var(--text); line-height:1.2; }
+  .hhead p { margin:2px 0 0; font-size:12px; }
+  #rvView .hclose { margin-left:auto; width:30px; height:30px; padding:0; border-radius:50%; display:grid; place-items:center; font-size:14px; }
+  .steps { list-style:none; margin:0; padding:14px 16px 6px; display:grid; counter-reset:s; }
+  .steps li { position:relative; counter-increment:s; padding:0 0 14px 40px; line-height:1.5; }
+  .steps li::before { content:counter(s); position:absolute; left:0; top:0; width:26px; height:26px; border-radius:50%; background:var(--accent-soft); color:var(--text); font:600 12px var(--mono); display:grid; place-items:center; }
+  .steps li::after { content:""; position:absolute; left:12.5px; top:30px; bottom:4px; width:1px; background:var(--line2); }
+  .steps li:last-child::after { display:none; }
+  .steps b { color:var(--text); font-weight:600; }
+  .steps code { background:var(--bg2); padding:1px 6px; border-radius:5px; color:var(--text); font-family:var(--mono); font-size:12px; }
+  .hfoot { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:11px 16px; border-top:1px solid var(--line); background:var(--panel2); font-size:12px; }
+  .hfoot a { color:var(--accent); }
+
+  /* main area: players + transport on the left, judgement on the right */
+  .rvmain { flex:1; min-height:0; display:grid; grid-template-columns:minmax(0,1fr); gap:10px; }
+  .rvmain:has(#rvPanel:not(.hidden)) { grid-template-columns:minmax(0,1fr) 400px; }
+  .rvleft { display:flex; flex-direction:column; gap:10px; min-height:0; min-width:0; }
+  #player { flex:1; min-height:0; display:flex; flex-direction:column; gap:10px; }
+  #player .empty { flex:1; display:flex; align-items:center; justify-content:center; border:1.5px dashed var(--line2); border-radius:14px; color:var(--dim); font-size:14px; text-align:center; padding:20px; }
+  .videos { flex:1; min-height:0; display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .panel { overflow:hidden; min-width:0; min-height:0; display:flex; flex-direction:column; }
+  .vlabel { display:flex; justify-content:space-between; align-items:center; padding:8px 12px; flex:none; }
+  .vlabel b { font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); font-weight:600; display:inline-flex; align-items:center; gap:7px; }
+  .vlabel b svg { width:14px; height:14px; color:var(--accent); }
+  .vlabel .rev { color:var(--rev); font-weight:600; margin-right:10px; font-size:11.5px; }
+  .stage { position:relative; background:var(--stage); flex:1; min-height:0; overflow:hidden; margin:0 8px; border-radius:11px; box-shadow:inset 0 0 0 1px rgba(255,255,255,.06); }
+  .stage video { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; display:block; }
+  .ended { display:none; position:absolute; inset:0; background:var(--ended-bg); align-items:center; justify-content:center; color:var(--warn); font-size:12px; pointer-events:none; }
+  .ended.on { display:flex; }
+  .hud { position:absolute; left:9px; right:9px; top:9px; display:flex; justify-content:space-between; align-items:center; pointer-events:none; }
+  .rec { display:inline-flex; align-items:center; gap:6px; font:600 10px var(--mono); letter-spacing:.08em; color:#fff; background:rgba(0,0,0,.5); backdrop-filter:blur(4px); padding:3px 8px; border-radius:99px; }
+  .rec i { width:7px; height:7px; border-radius:50%; background:#f43f5e; }
+  .playing .rec i { animation:rvblink 1.1s infinite; }
+  .tc { font:500 10.5px var(--mono); color:#e5edf7; background:rgba(0,0,0,.5); padding:3px 8px; border-radius:99px; }
+  @keyframes rvblink { 50% { opacity:.25; } }
+  .vctl { display:flex; align-items:center; gap:10px; padding:8px 12px 10px; flex:none; }
+  .vctl .vol { font:11px var(--mono); color:var(--dim); width:38px; text-align:right; }
+  #rvView button.mute, button.mute { display:inline-flex; align-items:center; gap:7px; height:30px; min-width:86px; padding:0 13px 0 10px; border-radius:99px; font-size:12px; font-weight:600; background:var(--panel2); }
+  .mute svg { width:16px; height:16px; flex:none; }
+  .mute .x { opacity:0; stroke-dasharray:26; stroke-dashoffset:26; transition:stroke-dashoffset .25s, opacity .2s; }
+  .mute .w { transition:opacity .2s, transform .25s; transform-origin:left center; }
+  #rvView .mute:hover:not(:disabled) { background:var(--accent-soft); }
+  #rvView .mute[aria-pressed="true"], #rvView .mute[aria-pressed="true"]:hover:not(:disabled) { background:var(--b-bad-bg); border-color:var(--err); color:var(--b-bad-fg); }
+  .mute[aria-pressed="true"] .x { opacity:1; stroke-dashoffset:0; }
+  .mute[aria-pressed="true"] .w { opacity:0; transform:scaleX(.4); }
+
+  /* transport */
+  .transport { flex:none; overflow:hidden; background:linear-gradient(180deg, var(--panel), var(--panel2)) !important; }
+  .tmain { display:flex; align-items:center; gap:16px; padding:10px 16px; flex-wrap:wrap; }
+  .ctrls { display:flex; align-items:center; gap:8px; flex:none; }
+  #rvView button.playbtn { width:46px; height:46px; border-radius:50%; padding:0; display:grid; place-items:center; flex:none; box-shadow:0 8px 18px -10px var(--ink), inset 0 0 0 1px rgba(255,255,255,.08); }
+  #rvView button.playbtn:hover:not(:disabled) { transform:scale(1.05); }
+  .playbtn svg { width:19px; height:19px; fill:currentColor; }
+  #rvView button.skip { width:36px; height:36px; border-radius:50%; padding:0; display:grid; place-items:center; position:relative; color:var(--muted); background:var(--panel); }
+  .skip svg { width:22px; height:22px; }
+  .skip span { position:absolute; font:700 8.5px var(--mono); color:var(--text); top:50%; left:50%; transform:translate(-50%,-38%); }
+  #rvView button.skip:hover:not(:disabled) { color:var(--accent); }
+  .timeline { flex:1 1 240px; min-width:0; display:flex; align-items:center; gap:12px; }
+  .now { font:600 19px var(--mono); letter-spacing:-.02em; min-width:6.4ch; color:var(--text); }
+  .tot { font:500 12px var(--mono); color:var(--dim); }
+  .seekwrap { position:relative; flex:1; min-width:0; height:24px; display:flex; align-items:center; }
+  #rvView .seekwrap input[type=range] { width:100%; display:block; flex:none; height:24px; }
+  #rvView .seekwrap input[type=range]::-webkit-slider-runnable-track { height:8px; }
+  #rvView .seekwrap input[type=range]::-moz-range-track, #rvView .seekwrap input[type=range]::-moz-range-progress { height:8px; }
+  #rvView .seekwrap input[type=range]::-webkit-slider-thumb { width:18px; height:18px; margin-top:-5px; }
+  .marks { position:absolute; left:8px; right:8px; top:50%; height:0; pointer-events:none; }
+  .marks i { position:absolute; width:11px; height:11px; margin:-5.5px 0 0 -5.5px; border-radius:50%; background:var(--warn); border:2.5px solid var(--panel); box-shadow:0 0 0 1px var(--warn); }
+  .tfoot { display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:8px 16px; border-top:1px solid var(--line); background:var(--panel2); font-size:12px; color:var(--muted); }
+  .lbl { font-size:10px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
+  .spd { display:inline-flex; align-items:center; gap:9px; }
+  .spd .lbl { display:inline-flex; align-items:center; gap:6px; }
+  .spd .lbl svg { width:14px; height:14px; color:var(--accent); }
+  .speeds { position:relative; display:inline-grid; grid-template-columns:repeat(4, 48px); background:var(--bg2); border-radius:99px; padding:3px; box-shadow:inset 0 1px 3px rgba(0,0,0,.14); }
+  .speeds .thumb { position:absolute; top:3px; bottom:3px; left:3px; width:48px; border-radius:99px; background:linear-gradient(180deg, color-mix(in srgb, var(--accent) 88%, #fff), var(--accent)); box-shadow:0 4px 12px -3px color-mix(in srgb, var(--accent) 75%, transparent), inset 0 1px 0 rgba(255,255,255,.35); transition:transform .28s cubic-bezier(.4,1.3,.5,1); transform:translateX(100%); }
+  #rvView .speeds button { position:relative; z-index:1; border:0; background:transparent; padding:5px 0; font:600 12px var(--mono); border-radius:99px; color:var(--muted); transition:color .2s; box-shadow:none; }
+  #rvView .speeds button:hover:not(:disabled) { background:transparent; color:var(--text); }
+  #rvView .speeds button[aria-pressed="true"], #rvView .speeds button[aria-pressed="true"]:hover:not(:disabled) { color:var(--accent-ink); }
+  .insync { display:inline-flex; align-items:center; gap:7px; font:500 11px var(--mono); color:var(--b-ok-fg); background:var(--b-ok-bg); padding:3px 10px; border-radius:99px; }
+  .insync .syncdot { width:7px; height:7px; }
+  .insync.warn { background:var(--b-warn-bg); color:var(--b-warn-fg); }
+  .keys { margin-left:auto; display:flex; align-items:center; gap:14px; flex-wrap:wrap; font-size:11.5px; color:var(--muted); }
+  .kg { display:inline-flex; align-items:center; gap:7px; }
+  .kg + .kg { padding-left:14px; border-left:1px solid var(--line2); }
+  .kc { display:inline-flex; gap:4px; }
+  kbd { display:inline-grid; place-items:center; min-width:24px; height:24px; padding:0 7px; font:600 11px var(--mono); color:var(--text);
+    background:linear-gradient(180deg, var(--panel), var(--panel2)); border:1px solid var(--line2); border-bottom-width:3px; border-radius:7px; box-shadow:0 1px 2px rgba(0,0,0,.08); }
+  kbd svg { width:11px; height:11px; }
+  kbd.wide { min-width:52px; letter-spacing:.04em; }
+
+  /* judgement */
+  .rvpanel { display:flex; flex-direction:column; min-height:0; overflow:hidden; border-color:var(--line2) !important; }
+  .jhead { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:14px 18px; border-bottom:1px solid var(--line); flex:none;
+    background:radial-gradient(240px 90px at 0% 0%, color-mix(in srgb, var(--accent) 13%, transparent), transparent 80%), var(--panel); }
+  .jleft { min-width:0; }
+  .jk { display:block; font-size:10px; font-weight:600; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); line-height:1; margin-bottom:6px; user-select:none; -webkit-user-select:none; }
+  .jnum { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
+  .cid { font-family:var(--head); font-size:30px; font-weight:700; letter-spacing:-.03em; line-height:1; user-select:all; -webkit-user-select:all; cursor:text; }
+  .rvsaved { display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:500; white-space:nowrap; color:var(--ok); }
+  .rvsaved:empty { display:none; }
+  .rvsaved::before { content:""; width:7px; height:7px; border-radius:50%; background:currentColor; }
+  .rvsaved.busy { color:var(--warn); }
+  .rvsaved.busy::before { animation:rvblink 1.4s infinite; }
+  .jr { display:flex; align-items:center; gap:10px; }
+  .rcap { font-size:11px; color:var(--muted); }
+  .ring { position:relative; width:54px; height:54px; flex:none; }
+  .ring svg { width:100%; height:100%; transform:rotate(-90deg); display:block; }
+  .ring circle { fill:none; stroke-width:5; }
+  .ring .rb { stroke:var(--line2); }
+  .ring .rf { stroke:var(--accent); stroke-linecap:round; stroke-dasharray:113.1; stroke-dashoffset:113.1; transition:stroke-dashoffset .5s cubic-bezier(.4,1.2,.5,1); }
+  .ring b { position:absolute; inset:0; display:flex; align-items:baseline; justify-content:center; padding-top:19px; font:600 12.5px var(--mono); letter-spacing:-.04em; white-space:nowrap; }
+  .ring b span { color:var(--dim); font-weight:500; font-size:10px; }
+  .jbody { flex:1; min-height:0; overflow:auto; padding:14px 16px; display:flex; flex-direction:column; gap:10px; }
+  .cl { font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); font-weight:600; margin:2px 0 -2px; }
+  .cl label { margin:0; font-size:inherit; color:inherit; letter-spacing:inherit; }
+  .rvseg { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; }
+  #rvView .rvseg button { padding:9px 4px 7px; font-weight:600; font-size:12.5px; border-radius:11px; display:flex; flex-direction:column; align-items:center; gap:2px; border:1.5px solid var(--line2); }
+  .rvseg svg { width:19px; height:19px; opacity:.85; }
+  .rvseg small { font:500 9.5px var(--mono); color:var(--dim); }
+  .rvseg button[aria-pressed="true"] small { color:inherit; opacity:.75; }
+  #rvView .rvseg .cheat:hover:not([aria-pressed="true"]) { border-color:var(--err); } #rvView .rvseg .maybe:hover:not([aria-pressed="true"]) { border-color:var(--warn); } #rvView .rvseg .clean:hover:not([aria-pressed="true"]) { border-color:var(--ok); }
+  #rvView .rvseg .cheat[aria-pressed="true"] { background:var(--b-bad-bg); color:var(--b-bad-fg); border-color:var(--err); box-shadow:0 6px 16px -8px var(--err); }
+  #rvView .rvseg .maybe[aria-pressed="true"] { background:var(--b-warn-bg); color:var(--b-warn-fg); border-color:var(--warn); box-shadow:0 6px 16px -8px var(--warn); }
+  #rvView .rvseg .clean[aria-pressed="true"] { background:var(--b-ok-bg); color:var(--b-ok-fg); border-color:var(--ok); box-shadow:0 6px 16px -8px var(--ok); }
+  .gauge { display:flex; align-items:center; gap:14px; }
+  .dial { position:relative; width:112px; flex:none; }
+  .dial svg { width:100%; display:block; }
+  .dial .val { position:absolute; left:0; right:0; bottom:1px; text-align:center; font:600 21px var(--head); letter-spacing:-.02em; line-height:1; }
+  .dial .val small { font-size:11px; color:var(--muted); font-weight:500; }
+  .gcol { flex:1; min-width:0; display:flex; flex-direction:column; gap:5px; }
+  .numrow { display:flex; align-items:center; gap:9px; }
+  .rvnum { display:flex; align-items:baseline; gap:2px; border:1px solid var(--line2); border-radius:9px; padding:3px 9px; background:var(--panel); }
+  #rvView .rvnum input { width:3ch; border:0; background:transparent; text-align:right; font:600 14px var(--mono); padding:0; box-shadow:none; color:var(--text); }
+  #rvView .rvnum input:focus { outline:none; box-shadow:none; }
+  .rvband { font-size:11.5px; font-weight:600; padding:3px 10px; border-radius:99px; white-space:nowrap; }
+  .rvband.low { background:var(--b-ok-bg); color:var(--b-ok-fg); } .rvband.mid { background:var(--b-warn-bg); color:var(--b-warn-fg); } .rvband.high { background:var(--b-bad-bg); color:var(--b-bad-fg); }
+  .ticks { display:flex; justify-content:space-between; font:10px var(--mono); color:var(--dim); padding:0 3px; }
+  #rvView #rvPct::-webkit-slider-runnable-track { background:linear-gradient(90deg,#22c55e,#f59e0b 55%,#e11d48); opacity:.9; }
+  #rvView #rvPct::-moz-range-track { background:linear-gradient(90deg,#22c55e,#f59e0b 55%,#e11d48); }
+  #rvView #rvPct::-moz-range-progress { background:transparent; }
+  #rvView #rvPct::-webkit-slider-thumb { border-color:var(--ink); }
+  #rvView #rvPct::-moz-range-thumb { border-color:var(--ink); }
+  #rvComment { flex:1; width:100%; min-height:70px; resize:none; padding:10px 12px; background:var(--panel2); color:var(--text); border:1px solid var(--line2); border-radius:11px; font-size:12.5px; line-height:1.5; font-family:var(--mono); transition:border-color .15s, box-shadow .15s; }
+  #rvComment:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); background:var(--panel); }
+  .chips { display:flex; gap:5px; flex-wrap:nowrap; }
+  #rvView .rvchip { border-radius:99px; padding:4px 8px; font-size:11px; background:var(--panel2); white-space:nowrap; flex:none; }
+  .rvchip b { font-family:var(--mono); color:var(--accent); }
+  #rvView .rvchip.t { border-color:color-mix(in srgb, var(--accent) 50%, var(--line2)); }
+  .jfoot { display:flex; gap:8px; flex-wrap:wrap; align-items:center; padding:10px 16px; border-top:1px solid var(--line); background:var(--panel2); flex:none; }
+  #rvView .jfoot button.accent { padding:8px 18px; }
+  .jfoot .hint { width:100%; order:5; display:flex; align-items:center; gap:5px; font-size:10.5px; color:var(--dim); opacity:.85; }
+  .jfoot .hint kbd { min-width:0; height:17px; font-size:9.5px; padding:0 5px; border-radius:5px; border-bottom-width:2px; box-shadow:none; color:var(--muted); }
+  .plus { font-size:10px; }
+
+  /* final report sheet */
+  .sheet-bg { position:fixed; inset:0; z-index:60; background:rgba(5,8,13,.55); backdrop-filter:blur(3px); display:grid; place-items:center; padding:16px; }
+  .sheet-bg.hidden { display:none !important; }
+  .rvreport { width:min(1000px, 100%); max-height:100%; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 40px 80px -20px rgba(0,0,0,.6) !important; }
+  .report-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:14px 18px; flex:none; }
+  .report-head h3 { margin:0; font-family:var(--head); font-size:16px; font-weight:600; }
+  .sub { color:var(--muted); font-size:12px; font-weight:400; font-family:var(--font); }
+  .live { display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:700; letter-spacing:.04em; color:var(--b-ok-fg); background:var(--b-ok-bg); padding:3px 10px; border-radius:99px; }
+  .live i { width:6px; height:6px; border-radius:50%; background:var(--ok); animation:rvblink 1.6s infinite; }
+  .rvreport .tablewrap { overflow:auto; min-height:0; max-height:none; border:0; border-top:1px solid var(--line); border-radius:0; margin:0; }
+  .rvreport table { border-collapse:separate; border-spacing:0; width:100%; min-width:680px; font-size:13px; }
+  .rvreport th, .rvreport td { text-align:left; padding:10px 16px; border-bottom:1px solid var(--line); vertical-align:top; max-width:none; overflow:visible; white-space:normal; text-overflow:clip; }
+  .rvreport th { position:sticky; top:0; background:var(--panel2); font-size:10.5px; letter-spacing:.07em; text-transform:uppercase; color:var(--muted); font-weight:600; z-index:1; white-space:nowrap; }
+  .rvreport tbody tr:hover td { background:var(--panel2); }
+  .rvreport td.c { white-space:pre-line; min-width:200px; font-family:var(--mono); font-size:12px; color:var(--muted); }
+  .who { display:inline-flex; align-items:center; gap:8px; white-space:nowrap; }
+  .av { width:24px; height:24px; border-radius:50%; background:var(--accent-soft); font:600 10.5px var(--head); display:grid; place-items:center; }
+  .rvtag { font-size:12px; font-weight:600; padding:3px 10px; border-radius:99px; white-space:nowrap; }
+  .rvtag.cheat { background:var(--b-bad-bg); color:var(--b-bad-fg); } .rvtag.maybe { background:var(--b-warn-bg); color:var(--b-warn-fg); } .rvtag.clean { background:var(--b-ok-bg); color:var(--b-ok-fg); }
+  .fbar { display:inline-flex; align-items:center; gap:8px; font:500 12px var(--mono); }
+  .fbar i { width:54px; height:5px; border-radius:99px; background:var(--line); overflow:hidden; display:block; }
+  .fbar i b { display:block; height:100%; border-radius:99px; }
+  .rvreport tr.fresh td { background:color-mix(in srgb, var(--ok) 14%, var(--panel)); }
+  .rvnote { color:var(--muted); font-size:12px; }
+  .rvreport .rvnote { padding:10px 18px 14px; flex:none; border-top:1px solid var(--line); }
+  @media (prefers-reduced-motion: no-preference) { .rvreport tr.fresh td { animation:rvfade 2.4s ease-out; } }
+  @keyframes rvfade { from { background:color-mix(in srgb, var(--ok) 38%, var(--panel)); } }
+
+  /* small screens and short windows: fall back to a normal scrolling page */
+  @media (max-width:1020px), (max-height:600px) {
+    body { overflow:auto; height:auto; } html { height:auto; }
+    main { flex:none; }
+    #rvView:not(.hidden) { flex:none; }
+    .rvmain, .rvmain:has(#rvPanel:not(.hidden)) { grid-template-columns:1fr; }
+    .videos { grid-template-columns:1fr; }
+    .stage { aspect-ratio:16/10; flex:none; }
+    #player { flex:none; }
+    .rvpanel { min-height:520px; }
+    .keys { margin-left:0; }
+  }
+  @media (prefers-reduced-motion: reduce) { #rvView *, #rvView *::before, #rvView *::after { animation:none !important; transition:none !important; } }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="13" height="12" rx="3"/><path d="M15.5 10.5l6-3.5v10l-6-3.5"/></svg></span>Candidate Video Reviewer</h1>
+  <span class="grow"></span>
+  <button id="themeBtn" title="Switch light / dark mode" aria-label="Switch light or dark mode"></button>
+  <span class="pill"><span class="dot" id="dot"></span><span id="status">Checking helper…</span></span>
+</header>
+
+<main>
+  <div id="setup" class="banner hidden">
+    <b>This browser can't access local folders.</b>
+    Open this page in <b>Chrome or Edge</b> (desktop). Nothing needs to be installed.
+  </div>
+
+  <!-- REVIEW VIEW -->
+  <section id="rvView">
+    <div id="helperHint" class="banner hidden">
+      <b>Judging needs the local helper.</b> Without it you can still watch the videos. To save verdicts, use the Google Sheet and download Excel, install it once (about 2 minutes):
+      <span class="onlyWin"><a href="Setup.bat" download>download Setup.bat</a> and double-click it.</span>
+      <span class="onlyUnix hidden"><button type="button" id="copyCmd">Copy setup command</button> and paste it into Terminal.</span>
+      Then reload this page. <span id="copyMsg" class="rvnote"></span>
+    </div>
+    <div id="rvOld" class="banner hidden"><b>The helper is out of date.</b> Close this window and run the launcher (.bat) again to update it, then reload this page.</div>
+
+    <!-- Setup strip: exam, reviewer, Google Sheet, sync status -->
+    <div id="rvSetup" class="card strip hidden">
+      <div class="rvf" id="rvExamRow"><label class="l" for="rvExam">Exam</label><select id="rvExam"></select></div>
+      <div class="rvf hidden" id="rvNewRow"><label class="l" for="rvNewName">New exam name</label>
+        <div class="row"><input type="text" id="rvNewName" placeholder="e.g. Java Test - Nov" maxlength="80" autocomplete="off" style="width:210px;flex:none"><button id="rvNewAdd" class="primary">Add exam</button><button id="rvNewCancel">Cancel</button></div></div>
+      <div class="rvf"><label class="l" for="rvName">Your name</label><input type="text" id="rvName" maxlength="40" autocomplete="off" placeholder="e.g. Ravi" style="width:130px"></div>
+      <div class="rvf rvgrow"><label class="l" for="rvSheet">Google Sheet link · set once, same for everyone</label>
+        <div class="row"><input type="text" id="rvSheet" placeholder="Paste the link from the Google script, ending in ?key=…" autocomplete="off" spellcheck="false"><button id="rvConnect">Connect</button><span id="rvConn" class="rvconn"></span></div></div>
+      <div class="rvsync">
+        <span class="rvpill" id="rvPill"><span class="rvdot" id="rvSyncDot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span><span id="rvSyncTxt"></span></span>
+        <a href="#" id="rvHelpLink" class="rvhlp" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A2.5 2.5 0 016.5 3H20v16H6.5A2.5 2.5 0 004 21.5v-16z"/><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/></svg>Setup guide</a>
+      </div>
+      <div id="rvHelp" class="rvhelp hidden">
+        <div class="hhead">
+          <span class="hico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/></svg></span>
+          <div><h4>Connect your Google Sheet</h4><p>One time only. Everyone reviewing uses the same link.</p></div>
+          <button type="button" class="hclose" id="rvHelpClose" aria-label="Close guide">✕</button>
+        </div>
+        <ol class="steps">
+          <li>Create a new empty <b>Google Sheet</b>. It becomes the list of exams.</li>
+          <li>Open <b>Extensions → Apps Script</b>, paste the script, and set <code>SECRET</code> to a long random text. Save.</li>
+          <li>Choose the function <code>setup</code>, press <b>Run</b>, and allow the permissions.</li>
+          <li><b>Deploy → New deployment → Web app</b>. Execute as <b>Me</b>, access <b>Anyone</b>. Copy the URL.</li>
+          <li>Paste the URL above, add <code>?key=</code> and your secret at the end, then press <b>Connect</b>.</li>
+        </ol>
+        <div class="hfoot"><button type="button" class="primary" id="rvCopyScript">Copy the script</button><a href="google_script.gs.txt" target="_blank" rel="noopener">or open it as text</a><span id="rvCopyMsg"></span>
+          <textarea id="rvScriptBox" class="hidden" readonly rows="8" spellcheck="false" style="width:100%;margin-top:4px;font:12px var(--mono);background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px"></textarea></div>
+      </div>
+    </div>
+
+    <!-- Folder and candidate navigation -->
+    <div class="card strip nav">
+      <input type="text" id="folderRv" placeholder="Paste video folder path here…">
+      <button id="browseRv">Browse</button>
+      <button id="reload">Reload</button>
+      <span class="sep"></span>
+      <button id="prev">◀ Prev</button>
+      <select id="candSel"></select>
+      <button id="next">Next ▶</button>
+      <button id="nextUnrev">Next Unreviewed</button>
+      <button id="markRev" class="primary">✓ Mark Reviewed</button>
+    </div>
+
+    <div class="rvmain">
+      <div class="rvleft">
+        <div id="player"><div class="empty">Select a candidate above to begin review.</div></div>
+      </div>
+
+      <!-- Judgement -->
+      <div id="rvPanel" class="card rvpanel hidden">
+        <div class="jhead">
+          <div class="jleft"><span class="jk">Judging candidate</span><div class="jnum"><span class="cid" id="rvCid">—</span><span class="rvsaved" id="rvSaved"></span></div></div>
+          <div class="jr">
+            <div class="rcap"><b id="rvProgTxt" hidden></b><span>Judged</span></div>
+            <div class="ring" role="img" aria-label="Candidates judged"><svg viewBox="0 0 44 44"><circle class="rb" cx="22" cy="22" r="18"/><circle class="rf" id="rvRingF" cx="22" cy="22" r="18"/></svg><b id="rvRingTxt">0<span>/0</span></b></div>
+          </div>
+        </div>
+        <div class="jbody">
+          <div class="cl" id="rvVL">Verdict</div>
+          <div class="rvseg" role="group" aria-labelledby="rvVL">
+            <button type="button" data-v="cheat" class="cheat" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M15 9l-6 6M9 9l6 6"/></svg>Cheater<small>key 1</small></button>
+            <button type="button" data-v="maybe" class="maybe" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 114 2c-.9.6-1.5 1.1-1.5 2.2M12 17h.01"/></svg>Unsure<small>key 2</small></button>
+            <button type="button" data-v="clean" class="clean" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16 9.5"/></svg>Not a cheater<small>key 3</small></button>
+          </div>
+          <div class="cl"><label for="rvPct">Fraud probability</label></div>
+          <div class="gauge">
+            <div class="dial"><svg viewBox="0 0 120 70" aria-hidden="true"><defs><linearGradient id="rvgg" x1="0" x2="1"><stop offset="0" stop-color="#22c55e"/><stop offset=".55" stop-color="#f59e0b"/><stop offset="1" stop-color="#e11d48"/></linearGradient></defs>
+              <path d="M12 62 A48 48 0 0 1 108 62" fill="none" stroke="var(--line)" stroke-width="10" stroke-linecap="round"/>
+              <path id="rvArc" d="M12 62 A48 48 0 0 1 108 62" fill="none" stroke="url(#rvgg)" stroke-width="10" stroke-linecap="round" stroke-dasharray="151" stroke-dashoffset="151" style="transition:stroke-dashoffset .3s"/></svg>
+              <div class="val"><span id="rvGv">0</span><small>%</small></div></div>
+            <div class="gcol">
+              <input type="range" id="rvPct" min="0" max="100" step="5" value="0" data-nokeys="1">
+              <div class="ticks"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
+              <div class="numrow"><span class="rvnum"><input id="rvPctNum" type="text" inputmode="numeric" maxlength="3" value="0" aria-label="Fraud probability percent"><span>%</span></span><span id="rvBand" class="rvband low">Low</span></div>
+            </div>
+          </div>
+          <div class="cl"><label for="rvComment">Comments</label></div>
+          <textarea id="rvComment" maxlength="4000" placeholder="What did you see? e.g. looks off-screen, second voice…"></textarea>
+          <div class="chips">
+            <button type="button" class="rvchip t" id="rvStamp" title="Insert current time">+ Time <b id="rvStampT">00:00:00</b></button>
+            <button type="button" class="rvchip" data-q="Looking away from screen">Looking away</button>
+            <button type="button" class="rvchip" data-q="Second person in room">Second person</button>
+            <button type="button" class="rvchip" data-q="Phone used">Phone</button>
+          </div>
+        </div>
+        <div class="jfoot">
+          <button type="button" class="accent" id="rvSaveNext">Save &amp; next</button>
+          <button type="button" id="rvClear">Clear</button>
+          <span class="grow"></span>
+          <button type="button" class="primary" id="rvReportBtn" aria-expanded="false">Final report</button>
+          <div class="hint"><kbd>Ctrl</kbd><span class="plus">+</span><kbd>Enter</kbd><span>to save &amp; go to the next candidate</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Final report: opens as a sheet over the page -->
+    <div id="rvReport" class="sheet-bg hidden">
+      <div class="card rvreport" role="dialog" aria-modal="true" aria-labelledby="rvRName">
+        <div class="report-head">
+          <h3><span id="rvRName"></span> <span class="sub" id="rvRSub"></span></h3>
+          <span id="rvLive" class="live hidden"><i></i>LIVE</span>
+          <span class="grow"></span>
+          <button type="button" id="rvOpenGs" class="hidden">Open in Google Sheets ↗</button>
+          <button type="button" class="primary" id="rvDl">⬇ Download Excel</button>
+          <button type="button" id="rvClose" aria-label="Close report">Close ✕</button>
+        </div>
+        <div class="tablewrap"><table id="rvTable"></table></div>
+        <div id="rvRNote" class="rvnote"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+const API = store.get('helperUrl', 'http://127.0.0.1:8765');
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+async function api(path, opts) {
+  const r = await fetch(API + path, opts);
+  if (!r.ok) {
+    let m = r.statusText;
+    try { m = (await r.json()).detail || m; } catch {}
+    throw new Error(m);
+  }
+  return r.json();
+}
+const post = (path, body) => api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+
+/* ── Helper connection ──
+   Watching videos works without the helper (the browser's own folder picker is used). Judging needs it:
+   verdicts, the Google Sheet and the Excel file all go through the helper. */
+const hasFS = 'showDirectoryPicker' in window;
+const IS_MAC = /Mac/i.test(navigator.platform || '') || /Macintosh/.test(navigator.userAgent || '');
+const IS_LINUX = /Linux/i.test(navigator.platform || '') && !/Android|CrOS/i.test(navigator.userAgent || '');
+const IS_UNIX = IS_MAC || IS_LINUX;   // these get a Terminal command; Windows gets Setup.bat
+let connected = false;           // local helper detected
+let helperInfo = null;
+let dirHandle = null;            // folder picked with the browser's own picker (no helper)
+let folder = '';
+let firstCheckDone = false;      // false until the first helper check has answered
+const useHelper = () => connected;
+const helperSeen = () => store.get('helperSeen', '') === '1';   // has this browser ever talked to the helper?
+
+function updateStatus() {
+  $('dot').classList.toggle('on', connected);
+  $('dot').classList.toggle('warn', !connected && hasFS);
+  $('status').textContent = connected ? 'Local helper connected'
+    : !firstCheckDone ? 'Checking helper…'
+    : !hasFS ? 'Unsupported browser'
+    : helperSeen() ? 'Helper not running' : 'Helper not installed';
+  $('setup').classList.toggle('hidden', connected || hasFS);
+  $('helperHint').classList.toggle('hidden', connected || !firstCheckDone);
+  $('folderRv').readOnly = !connected;
+  $('folderRv').placeholder = connected ? 'Type or paste a folder path, or click Browse' : 'Click Browse to choose a folder (typing needs the local helper)';
+}
+function setConnected(ok, info) {
+  const was = connected; connected = ok; helperInfo = ok ? info : null;
+  if (ok) store.set('helperSeen', '1');
+  updateStatus();
+  if (ok !== was) { setFolder(ok ? store.get('folder', '') : (dirHandle ? dirHandle.name : '')); cur = null; loadCandidates(); }
+}
+let pingFails = 0;
+async function checkHelper() {
+  try {
+    const signal = AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined;
+    const info = await api('/api/ping', { signal });
+    pingFails = 0; firstCheckDone = true; setConnected(true, info);
+  } catch {
+    // a missed check (busy PC, Chrome's local-network permission prompt) must not flip modes
+    pingFails++;
+    if (pingFails >= 3 || !connected) { firstCheckDone = true; setConnected(false); }
+  }
+}
+
+// Install hint: Windows gets the Setup.bat link; macOS and Linux get a Terminal command
+document.querySelectorAll('.onlyWin').forEach((e) => e.classList.toggle('hidden', IS_UNIX));
+document.querySelectorAll('.onlyUnix').forEach((e) => e.classList.toggle('hidden', !IS_UNIX));
+$('copyCmd').onclick = async () => {
+  const cmd = `curl -fsSL ${location.origin}/install.sh | bash`;
+  try { await navigator.clipboard.writeText(cmd); $('copyMsg').textContent = 'Copied. Open Terminal, paste, press Enter.'; }
+  catch { $('copyMsg').textContent = cmd; }
+};
+
+/* ── Theme (light / dark) ── */
+function currentTheme() { return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'; }
+function paintThemeBtn() { $('themeBtn').textContent = currentTheme() === 'dark' ? '☀️ Light mode' : '🌙 Dark mode'; }
+$('themeBtn').onclick = () => {
+  const next = currentTheme() === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  store.set('theme', next);
+  paintThemeBtn();
+};
+if (window.matchMedia) {
+  // follow the system setting until the user picks one explicitly
+  matchMedia('(prefers-color-scheme: light)').addEventListener?.('change', (e) => {
+    if (store.get('theme', null) === null) { document.documentElement.setAttribute('data-theme', e.matches ? 'light' : 'dark'); paintThemeBtn(); }
+  });
+}
+paintThemeBtn();
+
+/* ── Toast ── */
+let toastTimer = null;
+function toast(msg) {
+  let t = $('toast');
+  if (!t) { t = document.createElement('div'); t.id = 'toast'; t.className = 'toast'; t.setAttribute('role', 'status'); document.body.appendChild(t); }
+  t.textContent = msg;
+  requestAnimationFrame(() => t.classList.add('show'));
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 8000);
+}
+
+/* ── Video folder ── */
+// `fromInput` = the box is being typed in; it is left untouched so the cursor doesn't jump
+function setFolder(p, fromInput) {
+  folder = p;
+  if (useHelper()) store.set('folder', p);
+  if (!fromInput) $('folderRv').value = p;
+}
+$('folderRv').oninput = (e) => { if (useHelper()) setFolder(e.target.value.trim(), true); };
+$('folderRv').onchange = () => { if (useHelper()) loadCandidates(); };
+$('folderRv').onkeydown = (e) => { if (e.key === 'Enter' && useHelper()) loadCandidates(); };
+
+let browsePending = 0;
+function paintBrowse() { $('browseRv').textContent = browsePending ? '⏳ Folder window open…' : 'Browse'; }
+let raising = false;
+function raiseFolderWindow() {
+  // One quick request at a time: piling up long-waiting requests fills Chrome's 6-connection limit,
+  // and the queued ones would later open NEW windows one by one as each window is cancelled.
+  if (raising) return;
+  raising = true;
+  post('/api/browse/raise').catch(() => {}).finally(() => { raising = false; });
+}
+async function browse() {
+  // While the folder window is open, extra clicks just bring it to the front (the helper never opens a second one)
+  if (browsePending) { raiseFolderWindow(); return; }
+  try {
+    if (useHelper()) {
+      browsePending++; paintBrowse();
+      let r;
+      try { r = await post('/api/browse', { start: folder, title: 'Select the folder that contains the candidate folders' }); }
+      finally { browsePending--; paintBrowse(); }
+      if (r.path) { setFolder(r.path); loadCandidates(); }
+    } else {
+      // No helper: the browser's own folder picker (read-only, nothing to install)
+      if (!hasFS) return alert('Please use Chrome or Edge on desktop.');
+      dirHandle = await showDirectoryPicker({ mode: 'read' });
+      setFolder(dirHandle.name); loadCandidates();
+    }
+  } catch (e) { if (e.name !== 'AbortError') alert('Could not open folder: ' + e.message); }
+}
+$('browseRv').onclick = browse;
+$('reload').onclick = loadCandidates;
+
+/* ── Reviewer ── */
+let cands = [], cur = null;
+const reviewedKey = () => 'reviewed:' + folder;
+const reviewed = () => { try { return new Set(JSON.parse(store.get(reviewedKey(), '[]'))); } catch { return new Set(); } };
+const saveReviewed = (s) => store.set(reviewedKey(), JSON.stringify([...s]));
+
+// Which file is the screen recording / the webcam recording? Exact name first (<id>_screenrecord.mp4),
+// otherwise any video whose name says screen / webcam; .mp4 is preferred over .webm.
+const VIDEO_EXT = ['.mp4', '.webm', '.mov', '.m4v'];
+function pickVideos(id, names) {
+  const vids = names.filter((n) => VIDEO_EXT.includes(n.slice(n.lastIndexOf('.')).toLowerCase()));
+  const rank = (n) => VIDEO_EXT.indexOf(n.slice(n.lastIndexOf('.')).toLowerCase());
+  const find = (kind, re) => {
+    const exact = vids.filter((n) => n.toLowerCase().startsWith((id + '_' + kind).toLowerCase()));
+    const loose = vids.filter((n) => re.test(n));
+    return ((exact.length ? exact : loose).sort((a, b) => rank(a) - rank(b))[0]) || null;
+  };
+  return { screen: find('screenrecord', /screen/i), webcam: find('webcam', /web ?cam|camera/i) };
+}
+async function loadCandidates() {
+  if (!folder) { cands = []; renderSelect(); return; }
+  try {
+    if (useHelper()) cands = (await api('/api/candidates?folder=' + encodeURIComponent(folder))).candidates;
+    else {
+      cands = [];
+      for await (const [name, h] of dirHandle.entries()) {
+        if (h.kind !== 'directory') continue;
+        const names = [];
+        for await (const [fn, fh] of h.entries()) if (fh.kind === 'file') names.push(fn);
+        cands.push({ name, ...pickVideos(name, names), files: names });
+      }
+      cands.sort((a, b) => a.name.localeCompare(b.name));
+    }
+  } catch { cands = []; }
+  if (cur && !cands.find((c) => c.name === cur)) cur = null;
+  renderSelect();
+}
+function renderSelect() {
+  const rev = reviewed();
+  $('candSel').innerHTML = '<option value="">Select a candidate…</option>' +
+    cands.map((c) => `<option value="${esc(c.name)}" ${c.name === cur ? 'selected' : ''}>${rev.has(c.name) ? '✓  ' : ''}${esc(c.name)}${window.rvTag ? esc(rvTag(c.name)) : ''}</option>`).join('');
+  const i = cands.findIndex((c) => c.name === cur);
+  $('prev').disabled = i <= 0;
+  $('next').disabled = i < 0 || i >= cands.length - 1;
+  $('nextUnrev').disabled = !cands.some((c) => !rev.has(c.name));
+  $('markRev').classList.toggle('hidden', !cur);
+  $('markRev').textContent = cur && rev.has(cur) ? 'Unmark Reviewed' : '✓ Mark Reviewed';
+  $('markRev').classList.toggle('primary', !(cur && rev.has(cur)));
+  window.rvOnList && rvOnList();
+}
+function select(name) { cur = name || null; renderSelect(); loadPlayer(); window.rvOnSelect && rvOnSelect(); document.title = cur ? cur + ' | Reviewer' : 'Candidate Video Reviewer'; }
+$('candSel').onchange = (e) => select(e.target.value);
+$('prev').onclick = () => { const i = cands.findIndex((c) => c.name === cur); if (i > 0) select(cands[i - 1].name); };
+$('next').onclick = () => { const i = cands.findIndex((c) => c.name === cur); if (i >= 0 && i < cands.length - 1) select(cands[i + 1].name); };
+$('nextUnrev').onclick = () => {
+  const rev = reviewed(), un = cands.filter((c) => !rev.has(c.name));
+  if (!un.length) return;
+  select((un.find((c) => c.name > (cur || '')) || un[0]).name);
+};
+$('markRev').onclick = () => { const s = reviewed(); s.has(cur) ? s.delete(cur) : s.add(cur); saveReviewed(s); renderSelect(); loadPlayer(); };
+
+let v1, v2, maxDur = 0, seeking = false;
+const fmt = (s) => { if (!isFinite(s) || s < 0) s = 0; return [Math.floor(s / 3600), Math.floor(s % 3600 / 60), Math.floor(s % 60)].map((v) => String(v).padStart(2, '0')).join(':'); };
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+function stopPlayer() { if (v1) v1.pause(); if (v2) v2.pause(); }
+let blobUrls = [], playerToken = 0;
+async function loadPlayer() {
+  const token = ++playerToken;
+  stopPlayer(); v1 = v2 = null; maxDur = 0;
+  blobUrls.forEach((u) => URL.revokeObjectURL(u)); blobUrls = [];
+  const box = $('player');
+  if (!cur) { box.innerHTML = '<div class="empty">Select a candidate above to begin review.</div>'; return; }
+  const c = cands.find((x) => x.name === cur);
+  if (!c || !c.screen || !c.webcam) {
+    const miss = [!c?.screen && `${cur}_screenrecord.mp4 (screen record)`, !c?.webcam && `${cur}_webcam.mp4 (webcam)`].filter(Boolean);
+    const found = c?.files ? (c.files.length ? ' Files in the ' + cur + ' folder: ' + c.files.join(', ') : ' The ' + cur + ' folder is empty.') : '';
+    box.innerHTML = `<div class="banner"><b>Missing files for ${esc(cur)}.</b> ${esc(miss.join(', '))}.${esc(found)}<br>Pick the folder that <i>contains</i> the candidate folders (the one that holds a folder per candidate, such as 5736 and 5753), not a candidate folder itself.</div>`; return;
+  }
+  const name = cur;
+  const url = async (f) => {
+    if (useHelper()) return `${API}/video?folder=${encodeURIComponent(folder)}&path=${encodeURIComponent(name + '/' + f)}`;
+    const d = await dirHandle.getDirectoryHandle(name);
+    const u = URL.createObjectURL(await (await d.getFileHandle(f)).getFile());
+    blobUrls.push(u); return u;
+  };
+  let src1, src2;
+  try { [src1, src2] = await Promise.all([url(c.screen === true ? name + '_screenrecord.mp4' : c.screen), url(c.webcam === true ? name + '_webcam.mp4' : c.webcam)]); }
+  catch (e) { box.innerHTML = `<div class="banner">Could not open videos: ${esc(e.message)}</div>`; return; }
+  if (token !== playerToken) return;
+  const isRev = reviewed().has(cur);
+  const ICO = {
+    screen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>',
+    cam: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.2"/></svg>',
+    mute: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H3v6h3l5 4V5z" fill="currentColor" fill-opacity=".15"/><g class="w"><path d="M15.5 8.5a5 5 0 010 7"/><path d="M18.5 5.5a9 9 0 010 13"/></g><path class="x" d="M3 3l18 18"/></svg>',
+  };
+  const PLAY = '<svg viewBox="0 0 24 24"><path d="M7 4.5v15l13-7.5z"/></svg>', PAUSE = '<svg viewBox="0 0 24 24"><path d="M6 4.5h4.2v15H6zM13.8 4.5H18v15h-4.2z"/></svg>';
+  const revBadge = isRev ? '<span class="rev">✓ reviewed</span>' : '';
+  const panel = (n, label, icon, src) => `
+    <div class="card panel">
+      <div class="vlabel"><b>${icon}${label}</b><span>${revBadge}<span id="dur${n}" class="mono">—</span></span></div>
+      <div class="stage"><video id="v${n}" preload="auto" playsinline src="${src}"></video><div class="ended" id="ov${n}">⏹ Video ended</div>
+        <div class="hud"><span class="rec"><i></i><span id="rt${n}">PAUSED</span></span><span class="tc" id="tc${n}">00:00:00</span></div></div>
+      <div class="vctl"><button class="mute" id="mute${n}" aria-pressed="false">${ICO.mute}<span class="mt">Mute</span></button><input type="range" id="vol${n}" min="0" max="1" step="0.05" value="1" aria-label="${label} volume"><span id="vl${n}" class="vol">100%</span></div>
+    </div>`;
+  box.innerHTML = `
+  <div class="videos" id="videos">${panel(1, 'Screen record', ICO.screen, src1)}${panel(2, 'Webcam record', ICO.cam, src2)}</div>
+  <div class="card transport">
+    <div class="tmain">
+      <div class="ctrls">
+        <button class="skip" id="back5" aria-label="Back 5 seconds"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 1 0 2.6-5.9M4 4v4.5h4.5"/></svg><span>5</span></button>
+        <button class="primary playbtn" id="play" aria-label="Play">${PLAY}</button>
+        <button class="skip" id="fwd5" aria-label="Forward 5 seconds"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v4.5h-4.5"/></svg><span>5</span></button>
+      </div>
+      <div class="timeline">
+        <span class="now" id="now">00:00:00</span>
+        <div class="seekwrap"><div class="marks" id="marks"></div><input type="range" id="seek" min="0" max="100" value="0" step="0.01" aria-label="Seek"></div>
+        <span class="tot" id="tot">00:00:00</span>
+      </div>
+    </div>
+    <div class="tfoot">
+      <div class="spd">
+        <span class="lbl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 18a8.5 8.5 0 1115 0"/><path d="M12 18l4.5-6"/></svg>Speed</span>
+        <div class="speeds" id="speeds" role="group" aria-label="Playback speed">
+          <span class="thumb" id="sthumb" aria-hidden="true"></span>
+          <button type="button" data-s="0.5" aria-pressed="false">0.5×</button><button type="button" data-s="1" aria-pressed="true">1×</button><button type="button" data-s="1.5" aria-pressed="false">1.5×</button><button type="button" data-s="2" aria-pressed="false">2×</button>
+        </div>
+      </div>
+      <span class="insync" id="sync"><span class="syncdot" id="sdot"></span><span id="slabel">In sync</span></span>
+      <span class="keys">
+        <span class="kg"><span class="kc"><kbd class="wide">Space</kbd></span><span>Play / pause</span></span>
+        <span class="kg"><span class="kc"><kbd aria-label="Left arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 6l-6 6 6 6"/></svg></kbd><kbd aria-label="Right arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></kbd></span><span>Skip 5s</span></span>
+      </span>
+    </div>
+  </div>`;
+  v1 = $('v1'); v2 = $('v2');
+  const play = $('play'), seek = $('seek');
+  let rate = 1;
+  const paintSeek = () => seek.style.setProperty('--p', seek.value + '%');
+  paintSeek();
+  const setPlayLabel = (playing) => {
+    play.innerHTML = playing ? PAUSE : PLAY; play.setAttribute('aria-label', playing ? 'Pause' : 'Play');
+    $('videos').classList.toggle('playing', playing);
+    $('rt1').textContent = $('rt2').textContent = playing ? 'PLAYING' : 'PAUSED';
+  };
+
+  const onMeta = () => {
+    const d1 = isFinite(v1.duration) ? v1.duration : 0, d2 = isFinite(v2.duration) ? v2.duration : 0;
+    maxDur = Math.max(d1, d2); $('dur1').textContent = fmt(d1); $('dur2').textContent = fmt(d2); $('tot').textContent = fmt(maxDur);
+    if (window.rvMarks) rvMarks();
+  };
+  v1.onloadedmetadata = v2.onloadedmetadata = onMeta;
+
+  const syncPlay = async () => {
+    v2.currentTime = clamp(v1.currentTime, 0, isFinite(v2.duration) ? v2.duration : v1.currentTime);
+    v1.playbackRate = v2.playbackRate = rate;
+    await Promise.all([v1.play(), v2.play()]);
+  };
+  window.togglePlay = async () => {
+    if (!v1) return;
+    if (!v1.paused || !v2.paused) { v1.pause(); v2.pause(); setPlayLabel(false); return; }
+    if (v1.ended) { v1.currentTime = v2.ended ? 0 : v2.currentTime; $('ov1').classList.remove('on'); }
+    if (v2.ended) { v2.currentTime = v1.ended ? 0 : v1.currentTime; $('ov2').classList.remove('on'); }
+    try { await syncPlay(); setPlayLabel(true); } catch {}
+  };
+  play.onclick = window.togglePlay;
+
+  v1.ontimeupdate = () => {
+    if (seeking) return;
+    const drift = Math.abs(v1.currentTime - v2.currentTime);
+    if (drift > 0.15) {
+      $('sync').classList.add('warn'); $('slabel').textContent = `Drift ${drift.toFixed(2)}s`;
+      v2.currentTime = clamp(v1.currentTime, 0, isFinite(v2.duration) ? v2.duration : v1.currentTime);
+    } else { $('sync').classList.remove('warn'); $('slabel').textContent = 'In sync'; }
+    if (maxDur > 0) { seek.value = v1.currentTime / maxDur * 100; paintSeek(); }
+    $('now').textContent = fmt(v1.currentTime); $('tot').textContent = fmt(maxDur);
+    $('tc1').textContent = fmt(v1.currentTime); $('tc2').textContent = fmt(v2.currentTime);
+  };
+
+  window.seekTo = async (t) => {
+    if (!v1) return;
+    const was = !v1.paused || !v2.paused; if (was) { v1.pause(); v2.pause(); }
+    seeking = true; const tg = clamp(t, 0, maxDur || t);
+    v1.currentTime = clamp(tg, 0, isFinite(v1.duration) ? v1.duration : tg);
+    v2.currentTime = clamp(tg, 0, isFinite(v2.duration) ? v2.duration : tg);
+    seeking = false; $('ov1').classList.remove('on'); $('ov2').classList.remove('on');
+    $('now').textContent = fmt(v1.currentTime); $('tc1').textContent = fmt(v1.currentTime); $('tc2').textContent = fmt(v2.currentTime);
+    if (maxDur > 0) { seek.value = v1.currentTime / maxDur * 100; paintSeek(); }
+    if (was) { try { await syncPlay(); } catch {} }
+  };
+  seek.oninput = () => { paintSeek(); window.seekTo(maxDur * seek.value / 100); };
+  $('back5').onclick = () => window.seekTo(v1.currentTime - 5);
+  $('fwd5').onclick = () => window.seekTo(v1.currentTime + 5);
+
+  [['1', v1], ['2', v2]].forEach(([n, v]) => {
+    const paintMute = () => { const off = v.muted || v.volume === 0; $('mute' + n).setAttribute('aria-pressed', String(off)); $('mute' + n).querySelector('.mt').textContent = off ? 'Unmute' : 'Mute'; };
+    $('vol' + n).oninput = (e) => {
+      v.volume = e.target.value; $('vl' + n).textContent = Math.round(e.target.value * 100) + '%';
+      e.target.style.setProperty('--p', (e.target.value * 100) + '%'); paintMute();
+    };
+    $('mute' + n).onclick = () => { v.muted = !v.muted; paintMute(); };
+  });
+  const spdBtns = [...document.querySelectorAll('#speeds button')];
+  spdBtns.forEach((b, i) => { b.onclick = () => {
+    rate = parseFloat(b.dataset.s); v1.playbackRate = v2.playbackRate = rate;
+    spdBtns.forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    $('sthumb').style.transform = 'translateX(' + (i * 100) + '%)';
+  }; });
+
+  v1.onended = () => { $('ov1').classList.add('on'); if (v2.paused || v2.ended) setPlayLabel(false); };
+  v2.onended = () => { $('ov2').classList.add('on'); if (v1.paused || v1.ended) setPlayLabel(false); };
+}
+
+let skipTimer = null;
+document.addEventListener('keydown', (e) => {
+  if (!v1) return;
+  if (!$('rvReport').classList.contains('hidden')) return;   // the final report sheet is open
+  if (e.target.dataset && e.target.dataset.nokeys) return;   // e.g. the fraud % slider keeps its own arrow keys
+  if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName) && e.target.type !== 'range') return;
+  if (e.code === 'Space') { e.preventDefault(); window.togglePlay(); }
+  else if (e.code === 'ArrowRight' || e.code === 'ArrowLeft') {
+    e.preventDefault();
+    const off = e.code === 'ArrowRight' ? 5 : -5;
+    clearTimeout(skipTimer); skipTimer = setTimeout(() => window.seekTo(v1.currentTime + off), 150);
+  }
+});
+</script>
+<script>
+/* ── Candidate review: verdict, fraud %, comments → the team's Google Sheet, then Excel ──
+   Every judgement is saved by the local helper (backup on this PC), then sent to the exam's own
+   Google Sheet in the background. Works offline: the helper keeps a queue and uploads later. */
+(() => {
+  const VK = { 'Cheater': 'cheat', 'Unsure': 'maybe', 'Not a cheater': 'clean' };
+  const VKEYS = { '1': 'cheat', '2': 'maybe', '3': 'clean' };
+  const R = {
+    exam: store.get('rv:exam', ''), name: store.get('rv:name', ''), exams: [], rows: {}, sheetUrl: null, stale: false,
+    cfg: { configured: false, masked: '' }, st: null, cand: null, d: { verdict: '', pct: 0, comment: '' },
+    timer: null, dirty: false, booted: false, reportOpen: false, prevKeys: null, adding: false,
+  };
+  const verOk = (v) => { const [a, b] = String(v || '0').split('.').map(Number); return a > 1 || (a === 1 && b >= 10); };
+  const ready = () => useHelper() && helperInfo && verOk(helperInfo.version);
+  const outdated = () => useHelper() && helperInfo && !verOk(helperInfo.version);
+  const band = (p) => p >= 70 ? ['High', 'high'] : p >= 30 ? ['Medium', 'mid'] : ['Low', 'low'];
+  const natural = (a, b) => /^\d+$/.test(a.candidate) && /^\d+$/.test(b.candidate) ? a.candidate - b.candidate : a.candidate.localeCompare(b.candidate);
+  const nowT = () => (typeof v1 !== 'undefined' && v1 && isFinite(v1.currentTime)) ? fmt(v1.currentTime) : '00:00:00';
+
+  /* ---- visibility ---- */
+  function paintVisibility() {
+    $('rvOld').classList.toggle('hidden', !outdated());
+    $('rvSetup').classList.toggle('hidden', !ready());
+    $('rvPanel').classList.toggle('hidden', !(ready() && cur));
+    $('rvReport').classList.toggle('hidden', !(ready() && cur && R.reportOpen));
+  }
+  function paintProgress() {
+    const n = cands.filter((c) => R.rows[c.name] && R.rows[c.name].verdict).length;
+    $('rvProgTxt').textContent = `${n} of ${cands.length} judged`;
+    $('rvRingTxt').innerHTML = n + '<span>/' + cands.length + '</span>';
+    $('rvRingF').style.strokeDashoffset = 113.1 * (1 - (cands.length ? n / cands.length : 0));
+  }
+
+  /* ---- connection to the Google Sheet ---- */
+  function paintConfig() {
+    const inp = $('rvSheet');
+    if (document.activeElement !== inp) inp.value = R.cfg.configured ? R.cfg.masked : '';
+    $('rvConn').textContent = R.cfg.configured ? '● Connected' : 'Not connected';
+    $('rvConn').classList.toggle('on', R.cfg.configured);
+  }
+  function paintSync(msg, isErr) {
+    const dot = $('rvSyncDot'), t = $('rvSyncTxt'), pill = $('rvPill'), s = R.st;
+    const set = (html, level) => { t.innerHTML = html; pill.className = 'rvpill' + (level ? ' ' + level : ''); dot.classList.toggle('warn', !!level); pill.classList.toggle('hidden', !html); t.title = t.textContent; };
+    if (msg) return set(esc(msg), isErr ? 'bad' : 'warn');
+    if (!s) return set('');
+    if (!s.configured) set('Saved on this PC only', 'warn');
+    else if (s.last_error && String(s.last_error).startsWith('Wrong key')) set(esc(s.last_error) + '. Paste the link again.', 'bad');
+    else if (s.queued > 0) set(`${s.queued} waiting to upload` + (s.online === false ? ' · offline' : '…'), 'warn');
+    else set('<b>Synced</b>' + (s.last_ok ? '<span class="t">' + esc(s.last_ok.slice(11)) + '</span>' : ''));
+  }
+  async function pollStatus() {
+    if (!ready()) return;
+    try { R.st = await api('/api/review/status'); paintSync(); } catch {}
+  }
+  async function loadConfig() { try { R.cfg = await api('/api/review/config'); } catch {} paintConfig(); }
+  async function connect() {
+    const v = $('rvSheet').value.trim();
+    if (v === R.cfg.masked || v.includes('…')) return;          // untouched
+    paintSync('Connecting…');
+    try {
+      const r = await post('/api/review/config', { sheet: v });
+      R.cfg = r; paintConfig();
+      toast(!v ? 'Disconnected. Judgements are saved on this PC only.'
+        : r.verified ? 'Connected to the Google Sheet.' : 'Saved. Google could not be reached just now; it will connect when the internet is back.');
+      await loadExams(); await loadRows(); pollStatus();
+    } catch (e) { paintSync(e.message, true); }
+  }
+
+  /* ---- exams ---- */
+  // The Exam dropdown and the "new exam name" box take turns in the same spot:
+  // the box shows only after "+ New exam…" is chosen (or when there is no exam yet to pick).
+  function paintNew(focus) {
+    const on = R.adding || !R.exams.length;
+    $('rvExamRow').classList.toggle('hidden', on);
+    $('rvNewRow').classList.toggle('hidden', !on);
+    $('rvNewCancel').classList.toggle('hidden', !R.exams.length);
+    if (on && focus) $('rvNewName').focus();
+  }
+  function paintExams() {
+    $('rvExam').innerHTML = R.exams.map((n) => `<option>${esc(n)}</option>`).join('') + '<option value="__new">+ New exam…</option>';
+    $('rvExam').value = R.exams.includes(R.exam) ? R.exam : '__new';
+    paintNew();
+  }
+  async function loadExams() {
+    let list;
+    try { list = (await api('/api/review/exams')).exams; } catch { return; }
+    R.exams = list.filter((e) => String(e.status || 'Active').toLowerCase() !== 'closed' || e.name === R.exam).map((e) => e.name);
+    if (!R.exams.includes(R.exam)) R.exam = R.exams[0] || '';
+    store.set('rv:exam', R.exam);
+    paintExams();
+  }
+  async function flushPending(exam) {
+    if (!R.timer) return;
+    clearTimeout(R.timer); R.timer = null;
+    await saveNow(exam, R.cand, { ...R.d });
+  }
+  async function switchExam(oldExam) {
+    await flushPending(oldExam);
+    store.set('rv:exam', R.exam);
+    const f = store.get('rv:folder:' + R.exam, '');
+    if (useHelper()) {
+      if (f && f !== folder) { setFolder(f); select(''); await loadCandidates(); }
+      else if (!f && folder && oldExam && R.exam !== oldExam) { setFolder(''); select(''); await loadCandidates(); toast('Choose the video folder for this exam (Browse).'); }
+    }
+    R.rows = {}; R.prevKeys = null;
+    await loadRows();
+  }
+  async function addExam() {
+    const name = $('rvNewName').value.trim();
+    if (!name) return;
+    const old = R.exam;
+    $('rvNewName').value = ''; R.adding = false; paintNew();
+    try {
+      const r = await post('/api/review/exams', { name, reviewer: R.name });
+      R.exam = r.name;
+      toast(r.existing ? `"${r.name}" already exists, switched to it.` : `Exam "${r.name}" added.`);
+      await loadExams(); await switchExam(old);
+    } catch (e) { toast(e.message); $('rvNewName').value = name; R.adding = true; paintNew(true); }
+  }
+
+  /* ---- judgements ---- */
+  async function loadRows() {
+    if (!ready()) return;
+    const exam = R.exam;
+    if (!exam) { R.rows = {}; refreshAll(); return; }
+    try {
+      const r = await api('/api/review/rows?exam=' + encodeURIComponent(exam));
+      if (exam !== R.exam) return;
+      R.rows = {}; r.rows.forEach((x) => { R.rows[x.candidate] = x; });
+      R.sheetUrl = r.sheet_url; R.stale = !!r.stale;
+    } catch { R.stale = true; }
+    refreshAll();
+  }
+  function refreshAll() { renderSelect(); if (!R.dirty && !R.timer) loadFields(); renderReport(); }
+  function loadFields() {
+    const r = R.rows[cur];
+    R.cand = cur;
+    R.d = r ? { verdict: VK[r.verdict] || '', pct: r.pct || 0, comment: r.comment || '' } : { verdict: '', pct: 0, comment: '' };
+    $('rvSaved').textContent = r && r.verdict ? 'Saved' + (r.at ? ' · ' + r.at.slice(11) : '') : '';
+    $('rvSaved').classList.remove('busy');
+    paintFields();
+  }
+  function paintFields() {
+    document.querySelectorAll('#rvPanel .rvseg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.v === R.d.verdict)));
+    $('rvPct').value = R.d.pct;
+    if (document.activeElement !== $('rvPctNum')) $('rvPctNum').value = R.d.pct;
+    const b = band(R.d.pct); $('rvBand').textContent = b[0]; $('rvBand').className = 'rvband ' + b[1];
+    if (document.activeElement !== $('rvComment')) $('rvComment').value = R.d.comment;
+    $('rvCid').textContent = cur || '—';
+    $('rvGv').textContent = R.d.pct; $('rvArc').style.strokeDashoffset = 151 * (1 - R.d.pct / 100);
+    paintMarks();
+  }
+  // Amber dots on the seek bar at every [hh:mm:ss] stamp in the comments
+  function paintMarks() {
+    const box = $('marks'); if (!box) return;
+    if (!(typeof maxDur !== 'undefined' && maxDur > 0)) { box.innerHTML = ''; return; }
+    const ts = [...new Set((R.d.comment.match(/\[(\d\d:\d\d:\d\d)\]/g) || []).map((x) => x.slice(1, -1)))];
+    box.innerHTML = ts.map((x) => { const sec = x.split(':').reduce((acc, n) => acc * 60 + +n, 0); return `<i style="left:${Math.min(100, sec / maxDur * 100)}%" title="${x}"></i>`; }).join('');
+  }
+  window.rvMarks = paintMarks;
+  function touch(immediate) {
+    if (!cur) return;
+    if (!R.name) { toast('Enter your name first (above the videos).'); $('rvName').focus(); return; }
+    if (!R.exam) { toast('Choose or add an exam first.'); return; }
+    R.dirty = true;
+    $('rvSaved').textContent = 'Saving…'; $('rvSaved').classList.add('busy');
+    clearTimeout(R.timer);
+    const exam = R.exam, cand = cur;
+    R.timer = setTimeout(() => { R.timer = null; saveNow(exam, cand, { ...R.d }); }, immediate ? 0 : 700);
+  }
+  async function saveNow(exam, cand, d) {
+    if (!cand || !R.name || !exam) return;
+    try {
+      const r = await post('/api/review', { exam, candidate: cand, reviewer: R.name, verdict: d.verdict, pct: d.pct, comment: d.comment });
+      if (exam !== R.exam) return;
+      const s = reviewed();
+      if (r.cleared || !r.row) { delete R.rows[cand]; s.delete(cand); saveReviewed(s); }
+      else { R.rows[cand] = r.row; if (d.verdict && !s.has(cand)) { s.add(cand); saveReviewed(s); } }
+      if (cand === cur && !R.timer) {
+        R.dirty = false;
+        $('rvSaved').textContent = r.cleared ? 'Cleared' : 'Saved · ' + r.row.at.slice(11);
+        $('rvSaved').classList.remove('busy');
+      }
+      renderSelect(); renderReport(); pollStatus();
+    } catch (e) { $('rvSaved').textContent = 'Not saved: ' + e.message; $('rvSaved').classList.add('busy'); }
+  }
+  function setVerdict(v) { R.d.verdict = R.d.verdict === v ? '' : v; paintFields(); touch(true); }
+  function setPct(p) { R.d.pct = Math.max(0, Math.min(100, Math.round(p) || 0)); paintFields(); touch(); }
+  function addLine(text) {
+    const el = $('rvComment');
+    el.value = (el.value.replace(/\s+$/, '') ? el.value.replace(/\s+$/, '') + '\n' : '') + text;
+    R.d.comment = el.value; el.focus(); el.setSelectionRange(el.value.length, el.value.length); touch();
+  }
+  async function saveNext() {
+    if (!cur) return;
+    if (R.timer) { clearTimeout(R.timer); R.timer = null; await saveNow(R.exam, cur, { ...R.d }); }
+    if (!R.d.verdict) { toast('Choose a verdict first: Cheater, Unsure or Not a cheater.'); return; }
+    const i = cands.findIndex((c) => c.name === cur);
+    if (i >= 0 && i < cands.length - 1) select(cands[i + 1].name); else toast('That was the last candidate in this folder.');
+  }
+
+  /* ---- final report ---- */
+  function renderReport() {
+    if (!R.reportOpen || !ready()) return;
+    $('rvRName').textContent = R.exam || 'No exam';
+    $('rvRSub').textContent = R.cfg.configured ? '· its own Google Sheet, all reviewers' : '· saved on this PC only';
+    $('rvLive').classList.toggle('hidden', !(R.cfg.configured && !R.stale));
+    $('rvOpenGs').classList.toggle('hidden', !(R.sheetUrl && /^https:\/\/docs\.google\.com\//.test(R.sheetUrl)));
+    const rows = Object.values(R.rows).sort(natural), next = {};
+    const col = (p) => p >= 70 ? 'var(--err)' : p >= 30 ? 'var(--warn)' : 'var(--ok)';
+    let h = '<thead><tr><th>Candidate no.</th><th>Verdict</th><th>Fraud %</th><th>Comments</th><th>Reviewed by</th><th>Reviewed at</th></tr></thead><tbody>';
+    rows.forEach((r) => {
+      const key = [r.verdict, r.pct, r.comment, r.at].join('|'); next[r.candidate] = key;
+      const fresh = R.prevKeys && R.prevKeys[r.candidate] !== key;
+      const pct = Number(r.pct) || 0, who = String(r.reviewer || '');
+      const ini = who.split(/\s+/).filter(Boolean).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+      h += `<tr class="${fresh ? 'fresh' : ''}"><td><b class="mono" style="color:var(--text);font-size:13px">${esc(r.candidate)}</b></td>` +
+        `<td>${r.verdict ? `<span class="rvtag ${VK[r.verdict] || ''}">${esc(r.verdict)}</span>` : ''}</td>` +
+        `<td><span class="fbar">${pct}%<i><b style="width:${pct}%;background:${col(pct)}"></b></i></span></td>` +
+        `<td class="c" title="${esc(r.comment || '')}">${esc(r.comment || '') || '–'}</td>` +
+        `<td>${who ? `<span class="who"><span class="av">${esc(ini)}</span>${esc(who)}</span>` : ''}</td>` +
+        `<td class="mono" style="font-size:12px;color:var(--muted)">${esc(r.at || '')}</td></tr>`;
+    });
+    $('rvTable').innerHTML = h + '</tbody>';
+    R.prevKeys = next;
+    const who = new Set(rows.map((r) => r.reviewer));
+    $('rvRNote').textContent = `${rows.length} judged candidate${rows.length === 1 ? '' : 's'} · ${who.size} reviewer${who.size === 1 ? '' : 's'}` +
+      (R.stale ? ' · offline: showing the last saved copy' : '') +
+      (R.cfg.configured ? '' : ' · connect a Google Sheet (above the videos) to share with your team');
+  }
+  async function download(all) {
+    const btn = $('rvDl'), label = btn.textContent;
+    if (!all && !R.exam) { toast('Choose an exam first.'); return; }
+    btn.disabled = true; btn.textContent = 'Preparing…';
+    try {
+      await flushPending(R.exam);
+      const r = await fetch(API + '/api/review/export' + (all ? '' : '?exams=' + encodeURIComponent(R.exam)));
+      if (!r.ok) { let m = r.statusText; try { m = (await r.json()).detail || m; } catch {} throw new Error(m); }
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(await r.blob());
+      a.download = all ? 'candidates_review_' + new Date().toISOString().slice(0, 10) + '.xlsx' : R.exam.replace(/[^\w.\- ]+/g, '_') + '.xlsx';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      toast('Excel file saved to your Downloads folder.');
+    } catch (e) { toast('Could not make the Excel file: ' + e.message); }
+    finally { btn.disabled = false; btn.textContent = label; }
+  }
+
+  /* ---- boot + hooks used by the reviewer code above ---- */
+  async function boot() {
+    $('rvName').value = R.name;
+    await loadConfig(); await loadExams(); await loadRows(); pollStatus();
+  }
+  function start() {
+    if (!ready()) return;
+    if (!R.booted) { R.booted = true; boot(); } else { loadRows(); pollStatus(); }
+  }
+  window.rvEnter = () => { paintVisibility(); start(); };
+  window.rvOnList = () => {
+    if (folder && R.exam && ready()) store.set('rv:folder:' + R.exam, folder);   // each exam remembers its own video folder
+    paintVisibility(); paintProgress(); if (!R.booted) start();
+  };
+  window.rvOnSelect = () => {
+    if (R.cand !== cur) { if (R.cand) flushPending(R.exam); R.dirty = false; loadFields(); }
+    paintVisibility();
+  };
+  window.rvTag = (name) => { const r = R.rows[name]; return r && r.verdict ? ' · ' + r.verdict : ''; };
+
+  /* ---- wiring ---- */
+  document.querySelectorAll('#rvPanel .rvseg button').forEach((b) => { b.onclick = () => setVerdict(b.dataset.v); });
+  $('rvPct').oninput = (e) => setPct(+e.target.value);
+  $('rvPctNum').oninput = (e) => { const v = e.target.value.replace(/\D/g, '').slice(0, 3); e.target.value = v; setPct(v === '' ? 0 : +v); };
+  $('rvPctNum').onblur = () => { $('rvPctNum').value = R.d.pct; };
+  $('rvComment').oninput = (e) => { R.d.comment = e.target.value; paintMarks(); touch(); };
+  $('rvStamp').onclick = () => addLine('[' + nowT() + '] ');
+  document.querySelectorAll('#rvPanel .rvchip[data-q]').forEach((b) => { b.onclick = () => addLine('[' + nowT() + '] ' + b.dataset.q); });
+  $('rvSaveNext').onclick = saveNext;
+  $('rvClear').onclick = () => { R.d = { verdict: '', pct: 0, comment: '' }; paintFields(); touch(true); };
+  async function setReport(open) {
+    R.reportOpen = open; R.prevKeys = null;
+    $('rvReportBtn').setAttribute('aria-expanded', String(open));
+    paintVisibility();
+    if (open) { await flushPending(R.exam); await loadRows(); $('rvClose').focus(); }
+  }
+  $('rvReportBtn').onclick = () => setReport(!R.reportOpen);
+  $('rvClose').onclick = () => setReport(false);
+  $('rvReport').onclick = (e) => { if (e.target === $('rvReport')) setReport(false); };
+  $('rvDl').onclick = () => download(false);
+  $('rvOpenGs').onclick = () => { if (R.sheetUrl && /^https:\/\/docs\.google\.com\//.test(R.sheetUrl)) window.open(R.sheetUrl, '_blank', 'noopener'); };
+  $('rvExam').onchange = async (e) => {
+    const old = R.exam;
+    if (e.target.value === '__new') { e.target.value = R.exams.includes(R.exam) ? R.exam : '__new'; R.adding = true; paintNew(true); return; }
+    R.exam = e.target.value; await switchExam(old);
+  };
+  $('rvNewAdd').onclick = addExam;
+  $('rvNewName').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); addExam(); } };
+  $('rvNewCancel').onclick = () => { $('rvNewName').value = ''; R.adding = false; paintNew(); };
+  $('rvName').oninput = () => { R.name = $('rvName').value.trim(); store.set('rv:name', R.name); };
+  $('rvSheet').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); connect(); } };
+  $('rvSheet').onchange = connect;
+  $('rvConnect').onclick = connect;
+  const setHelp = (on) => { $('rvHelp').classList.toggle('hidden', !on); $('rvHelpLink').setAttribute('aria-expanded', String(on)); };
+  $('rvHelpLink').onclick = (e) => { e.preventDefault(); setHelp($('rvHelp').classList.contains('hidden')); };
+  $('rvHelpClose').onclick = () => setHelp(false);
+  $('rvCopyScript').onclick = async () => {
+    let t = '';
+    try { t = await (await fetch('google_script.gs.txt')).text(); } catch {}
+    if (!t) { $('rvCopyMsg').textContent = ' Could not load the script. Open google_script.gs.txt from the site folder instead.'; return; }
+    try {
+      await navigator.clipboard.writeText(t);
+      $('rvCopyMsg').textContent = 'Copied. Paste it into the Apps Script editor.';
+    } catch {
+      // the browser refused the clipboard: show the script selected, so Ctrl+C works
+      const box = $('rvScriptBox');
+      box.value = t; box.classList.remove('hidden'); box.focus(); box.select();
+      $('rvCopyMsg').textContent = ' Press Ctrl+C now (the script is selected below), then paste it into the Apps Script editor.';
+    }
+  };
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { if (R.reportOpen) setReport(false); setHelp(false); return; }
+    if (R.reportOpen) return;
+    if (!ready() || !cur) return;
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveNext(); return; }
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName) || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (VKEYS[e.key]) { e.preventDefault(); setVerdict(VKEYS[e.key]); }
+  });
+  $('rvName').value = R.name;
+  setInterval(() => { if (cur) $('rvStampT').textContent = nowT(); }, 500);
+  setInterval(pollStatus, 4000);
+  setInterval(() => { if (R.reportOpen && ready() && !R.timer) loadRows(); }, 20000);
+})();
+</script>
+<script>
+/* ── Start ── */
+updateStatus();
+checkHelper(); setInterval(checkHelper, 5000);
+loadCandidates(); rvEnter();
+</script>
+</body>
+</html>

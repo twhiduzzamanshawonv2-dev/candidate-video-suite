@@ -5,10 +5,6 @@ try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::S
 $Base      = 'https://candidate-video-suite.vercel.app'
 $PythonUrl = 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip'
 $PipUrl    = 'https://bootstrap.pypa.io/get-pip.py'
-$FfmpegUrls = @(
-    'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip',
-    'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip'
-)
 
 function Step($m) { Write-Host "[+] $m" }
 
@@ -76,7 +72,7 @@ else { Step 'Downloading helper...'; Download "$Base/helper.py" $newHelper }
 Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
     Where-Object { $_.CommandLine -like '*CandidateHelper*helper.py*' } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-# ...and whatever else is holding the helper port (an old helper started another way, e.g. start_helper.bat,
+# ...and whatever else is holding the helper port (an old helper started another way, for example by hand,
 # would otherwise keep running and make the new one exit silently)
 try {
     Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue | ForEach-Object {
@@ -93,7 +89,7 @@ $pyDir = Join-Path $dir 'python'
 $py = Join-Path $pyDir 'python.exe'
 $needLibs = $true
 if (Test-Path $py) {
-    & $py -c "import fastapi, uvicorn, requests" 2>$null
+    & $py -c "import fastapi, uvicorn, requests, openpyxl" 2>$null
     if ($LASTEXITCODE -eq 0) { $needLibs = $false }
 }
 if ($needLibs) {
@@ -109,54 +105,23 @@ if ($needLibs) {
     Download $PipUrl (Join-Path $tmp 'get-pip.py')
     & $py (Join-Path $tmp 'get-pip.py') --no-warn-script-location --disable-pip-version-check
     if ($LASTEXITCODE -ne 0) { Fail 'pip installation failed.' }
-    Step 'Installing libraries (fastapi, uvicorn, requests)...'
-    & $py -m pip install --no-warn-script-location --disable-pip-version-check fastapi uvicorn requests
+    Step 'Installing libraries (fastapi, uvicorn, requests, openpyxl)...'
+    & $py -m pip install --no-warn-script-location --disable-pip-version-check fastapi uvicorn requests openpyxl
     if ($LASTEXITCODE -ne 0) { Fail 'Library installation failed.' }
 } else { Step 'Python and libraries already installed.' }
 
 & $py -m py_compile $helper
 if ($LASTEXITCODE -ne 0) { Fail 'helper.py is damaged (bad download). Run setup again.' }
 
-# 3. FFmpeg (private copy, unless one is already on PATH)
-$ffDir = Join-Path $dir 'ffmpeg'
-if ((Test-Path (Join-Path $ffDir 'ffmpeg.exe')) -or (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
-    Step 'FFmpeg already available.'
-} else {
-    $ok = $false
-    foreach ($u in $FfmpegUrls) {
-        try {
-            Step "Downloading FFmpeg (about 80 MB, please wait)..."
-            $zip = Join-Path $tmp 'ffmpeg.zip'
-            Remove-Safe $zip
-            Get-File $u $zip
-            $ex = Join-Path $tmp 'ffmpeg'
-            Expand-Archive -Path $zip -DestinationPath $ex -Force
-            $bin = Get-ChildItem $ex -Recurse -Filter 'ffmpeg.exe' | Select-Object -First 1
-            if (-not $bin) { throw 'ffmpeg.exe not found in archive' }
-            New-Item -ItemType Directory -Force $ffDir | Out-Null
-            Copy-Item $bin.FullName $ffDir -Force
-            $probe = Join-Path $bin.DirectoryName 'ffprobe.exe'
-            if (Test-Path $probe) { Copy-Item $probe $ffDir -Force }
-            $ok = $true; break
-        } catch { Write-Host "    ($u failed: $($_.Exception.Message))" }
-    }
-    if (-not $ok) { Write-Host '[!] FFmpeg could not be installed. Downloads still work; Convert (.mp4) needs FFmpeg.' -ForegroundColor Yellow }
-}
-
-# 4. Start at login and the cvhelper:// link. pythonw.exe has no window, so it is launched
-#    directly (no Windows Script Host, which some PCs have disabled).
+# 3. Start at login. pythonw.exe has no window, so it is launched directly
+#    (no Windows Script Host, which some PCs have disabled).
 $pyw = Join-Path $pyDir 'pythonw.exe'
 $cmd = '"' + $pyw + '" "' + $helper + '"'
-Remove-Safe (Join-Path $dir 'launcher.vbs')
-
 Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'CandidateHelper' -Value $cmd
-$proto = 'HKCU:\Software\Classes\cvhelper'
-New-Item -Path "$proto\shell\open\command" -Force | Out-Null
-Set-ItemProperty -Path $proto -Name '(default)' -Value 'URL:Candidate Helper'
-New-ItemProperty -Path $proto -Name 'URL Protocol' -Value '' -Force | Out-Null
-Set-ItemProperty -Path "$proto\shell\open\command" -Name '(default)' -Value $cmd
+# earlier versions registered a cvhelper:// link that nothing uses any more
+Remove-Safe 'HKCU:\Software\Classes\cvhelper'
 
-# 5. Start now and verify
+# 4. Start now and verify
 Step 'Starting helper...'
 Start-Process -FilePath $pyw -ArgumentList ('"' + $helper + '"') -WorkingDirectory $dir -WindowStyle Hidden
 $up = $false
@@ -169,8 +134,8 @@ Remove-Safe $tmp
 
 Write-Host ''
 if ($up) {
-    Write-Host "[+] Done. Helper is running (Python $($r.python), FFmpeg: $($r.ffmpeg))." -ForegroundColor Green
-    Write-Host '[+] It starts automatically at every login. Go back to the web page and click Re-check.'
+    Write-Host "[+] Done. Helper is running (Python $($r.python))." -ForegroundColor Green
+    Write-Host '[+] It starts automatically at every login. Go back to the web page and reload it.'
     Write-Host ''
     $keepOpen = $false
     for ($n = 8; $n -ge 1 -and -not $keepOpen; $n--) {

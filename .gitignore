@@ -2,3 +2,8 @@ __pycache__/
 *.pyc
 .vercel/
 node_modules/
+
+# files the helper writes next to itself when run from this folder (review_config.json holds the Google Sheet key)
+web/reviews/
+web/review_config.json
+web/helper.log
